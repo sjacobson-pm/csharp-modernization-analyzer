@@ -1,0 +1,16 @@
+{
+  "servers": {
+    "csharp-modernize": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": [
+        "run",
+        "--project",
+        "c:\\git\\csharp-modernization-analyzer\\src\\Analyzer.Mcp\\Analyzer.Mcp.csproj",
+        "--",
+        "--transport",
+        "stdio"
+      ]
+    }
+  }
+}
