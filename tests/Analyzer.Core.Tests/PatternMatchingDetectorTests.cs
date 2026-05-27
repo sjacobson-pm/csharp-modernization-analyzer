@@ -1,4 +1,6 @@
-using Analyzer.Core.Configuration;
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 using Analyzer.Core.Detection;
 using Analyzer.Core.Detection.Detectors;
 using Analyzer.Core.Standards;
@@ -9,28 +11,28 @@ namespace Analyzer.Core.Tests;
 
 public class PatternMatchingDetectorTests
 {
-    private readonly PatternMatchingDetector _detector = new();
+    private readonly PatternMatchingDetector detector = new();
 
     [Fact]
     public async Task Detects_Is_With_Cast_Pattern()
     {
-        var code = """
-            using System;
+        const string Code = """
+                            using System;
 
-            public class Processor
-            {
-                public void Process(object input)
-                {
-                    if (input is string)
-                    {
-                        var text = (string)input;
-                        Console.WriteLine(text.Length);
-                    }
-                }
-            }
-            """;
+                            public class Processor
+                            {
+                                public void Process(object input)
+                                {
+                                    if (input is string)
+                                    {
+                                        var text = (string)input;
+                                        Console.WriteLine(text.Length);
+                                    }
+                                }
+                            }
+                            """;
 
-        var results = await RunDetectorAsync(code);
+        var results = await this.RunDetectorAsync(Code);
 
         Assert.Single(results);
         Assert.Equal("MOD004", results[0].RuleId);
@@ -40,23 +42,23 @@ public class PatternMatchingDetectorTests
     [Fact]
     public async Task Detects_As_With_Null_Check_Pattern()
     {
-        var code = """
-            using System;
+        const string Code = """
+                            using System;
 
-            public class Processor
-            {
-                public void Process(object input)
-                {
-                    var text = input as string;
-                    if (text != null)
-                    {
-                        Console.WriteLine(text.Length);
-                    }
-                }
-            }
-            """;
+                            public class Processor
+                            {
+                                public void Process(object input)
+                                {
+                                    var text = input as string;
+                                    if (text != null)
+                                    {
+                                        Console.WriteLine(text.Length);
+                                    }
+                                }
+                            }
+                            """;
 
-        var results = await RunDetectorAsync(code);
+        var results = await this.RunDetectorAsync(Code);
 
         Assert.Single(results);
         Assert.Equal("MOD004", results[0].RuleId);
@@ -66,54 +68,47 @@ public class PatternMatchingDetectorTests
     [Fact]
     public async Task Ignores_When_EditorConfig_Disables_Pattern_Matching()
     {
-        var code = """
-            public class Processor
-            {
-                public void Process(object input)
-                {
-                    if (input is string)
-                    {
-                        var text = (string)input;
-                    }
-                }
-            }
-            """;
+        const string Code = """
+                            public class Processor
+                            {
+                                public void Process(object input)
+                                {
+                                    if (input is string)
+                                    {
+                                        var text = (string)input;
+                                    }
+                                }
+                            }
+                            """;
 
         var standards = new ResolvedStandards
         {
             EditorConfigPreferences = new Dictionary<string, string>
             {
                 ["csharp_style_pattern_matching_over_is_with_cast_check"] = "false : none",
-                ["csharp_style_pattern_matching_over_as_with_null_check"] = "false : none"
-            }
+                ["csharp_style_pattern_matching_over_as_with_null_check"] = "false : none",
+            },
         };
 
-        var results = await RunDetectorAsync(code, standards);
+        var results = await this.RunDetectorAsync(Code, standards);
 
         Assert.Empty(results);
     }
 
     [Fact]
-    public void Has_Correct_Minimum_LangVersion()
-    {
-        Assert.Equal(new Version(7, 0), _detector.MinimumLangVersion);
-    }
+    public void Has_Correct_Minimum_LangVersion() => Assert.Equal(new Version(7, 0), this.detector.MinimumLangVersion);
 
-    private async Task<IReadOnlyList<DetectionResult>> RunDetectorAsync(
-        string code,
-        ResolvedStandards? standards = null)
+    private async Task<IReadOnlyList<DetectionResult>> RunDetectorAsync(string code, ResolvedStandards? standards = null)
     {
         var tree = CSharpSyntaxTree.ParseText(code, path: "Test.cs");
 
         var references = new[]
         {
             MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(Console).Assembly.Location)
+            MetadataReference.CreateFromFile(typeof(Console).Assembly.Location),
         };
 
-        var compilation = CSharpCompilation.Create("TestAssembly",
-            syntaxTrees: [tree],
-            references: references);
+        var compilation = CSharpCompilation.Create("TestAssembly", syntaxTrees: [tree], references: references);
 
         var semanticModel = compilation.GetSemanticModel(tree);
 
@@ -124,9 +119,9 @@ public class PatternMatchingDetectorTests
             Compilation = compilation,
             TargetLangVersion = new Version(12, 0),
             Standards = standards ?? new ResolvedStandards(),
-            FilePath = "Test.cs"
+            FilePath = "Test.cs",
         };
 
-        return await _detector.DetectAsync(context);
+        return await this.detector.DetectAsync(context);
     }
 }

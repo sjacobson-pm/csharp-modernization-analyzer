@@ -1,4 +1,11 @@
 <Solution>
+  <Folder Name="/.root/">
+    <File Path=".gitignore" />
+    <File Path=".mcp.json" />
+    <File Path="action.yml" />
+    <File Path="Dockerfile" />
+    <File Path="README.md" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Analyzer.Action/Analyzer.Action.csproj" />
     <Project Path="src/Analyzer.Cli/Analyzer.Cli.csproj" />

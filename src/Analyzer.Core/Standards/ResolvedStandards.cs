@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+
 namespace Analyzer.Core.Standards;
 
 /// <summary>
@@ -22,10 +25,7 @@ public sealed class ResolvedStandards
     /// Check if an editorconfig preference is set to a specific value.
     /// Returns null if the preference is not configured.
     /// </summary>
-    public string? GetEditorConfigValue(string key)
-    {
-        return EditorConfigPreferences.TryGetValue(key, out var value) ? value : null;
-    }
+    public string? GetEditorConfigValue(string key) => this.EditorConfigPreferences.GetValueOrDefault(key);
 
     /// <summary>
     /// Returns true if the editorconfig explicitly disables a style
@@ -33,7 +33,8 @@ public sealed class ResolvedStandards
     /// </summary>
     public bool IsStyleDisabled(string key)
     {
-        var value = GetEditorConfigValue(key);
+        var value = this.GetEditorConfigValue(key);
+
         return value is not null && value.StartsWith("false", StringComparison.OrdinalIgnoreCase);
     }
 }
@@ -41,13 +42,17 @@ public sealed class ResolvedStandards
 public sealed class StyleCopSettings
 {
     public bool DocumentPrivateElements { get; init; }
+
     public bool SystemUsingDirectivesFirst { get; init; }
+
     public string UsingDirectivesPlacement { get; init; } = "outsideNamespace";
 }
 
 public sealed class ExternalStandard
 {
     public required string Url { get; init; }
+
     public required string Content { get; init; }
+
     public required DateTimeOffset FetchedAt { get; init; }
 }

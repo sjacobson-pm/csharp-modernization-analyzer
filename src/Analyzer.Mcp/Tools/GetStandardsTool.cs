@@ -1,31 +1,28 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Analyzer.Mcp.Tools;
 
 internal sealed class GetStandardsTool(AnalyzerService analyzer) : IMcpTool
 {
     public string Name => "get_standards";
+
     public string Description => "Report which repository standards sources are active.";
-    public JsonObject InputSchema => new()
-    {
-        ["type"] = "object",
-        ["properties"] = new JsonObject
+
+    public JsonObject InputSchema =>
+        new()
         {
-            ["repo_path"] = new JsonObject
+            ["type"] = "object",
+            ["properties"] = new JsonObject
             {
-                ["type"] = "string",
-                ["default"] = "."
+                ["repo_path"] = new JsonObject { ["type"] = "string", ["default"] = "." },
+                ["config_path"] = new JsonObject { ["type"] = "string", ["default"] = ".modernization.yml" },
             },
-            ["config_path"] = new JsonObject
-            {
-                ["type"] = "string",
-                ["default"] = ".modernization.yml"
-            }
-        },
-        ["additionalProperties"] = false
-    };
+            ["additionalProperties"] = false,
+        };
 
     public Task<object> ExecuteAsync(JsonElement arguments, CancellationToken cancellationToken)
     {

@@ -1,3 +1,8 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
@@ -9,7 +14,9 @@ namespace Analyzer.Core.Detection.Detectors;
 public sealed class TargetTypedNewDetector : IPatternDetector
 {
     public string RuleId => "MOD009";
+
     public string RuleName => "target-typed-new";
+
     public Version MinimumLangVersion => new(9, 0);
 
     public Task<IReadOnlyList<DetectionResult>> DetectAsync(DetectionContext context, CancellationToken cancellationToken = default)
@@ -19,22 +26,20 @@ public sealed class TargetTypedNewDetector : IPatternDetector
 
         foreach (var declaration in root.DescendantNodes().OfType<VariableDeclarationSyntax>())
         {
-            if (declaration.Type.IsVar || declaration.Variables.Count != 1)
-                continue;
+            if (declaration.Type.IsVar || declaration.Variables.Count != 1) { continue; }
 
             var variable = declaration.Variables[0];
-            if (variable.Initializer?.Value is not ObjectCreationExpressionSyntax creation)
-                continue;
 
-            TryAddResult(context, cancellationToken, results, declaration.Type, creation, variable);
+            if (variable.Initializer?.Value is not ObjectCreationExpressionSyntax creation) { continue; }
+
+            this.TryAddResult(context, cancellationToken, results, declaration.Type, creation, variable);
         }
 
         foreach (var property in root.DescendantNodes().OfType<PropertyDeclarationSyntax>())
         {
-            if (property.Initializer?.Value is not ObjectCreationExpressionSyntax creation)
-                continue;
+            if (property.Initializer?.Value is not ObjectCreationExpressionSyntax creation) { continue; }
 
-            TryAddResult(context, cancellationToken, results, property.Type, creation, property);
+            this.TryAddResult(context, cancellationToken, results, property.Type, creation, property);
         }
 
         return Task.FromResult<IReadOnlyList<DetectionResult>>(results);
@@ -51,26 +56,27 @@ public sealed class TargetTypedNewDetector : IPatternDetector
         var declaredType = context.SemanticModel.GetTypeInfo(declaredTypeSyntax, cancellationToken).Type;
         var createdType = context.SemanticModel.GetTypeInfo(creation, cancellationToken).Type;
 
-        if (declaredType is null || createdType is null)
-            return;
+        if (declaredType is null || createdType is null) { return; }
 
-        if (!SymbolEqualityComparer.Default.Equals(declaredType, createdType))
-            return;
+        if (!SymbolEqualityComparer.Default.Equals(declaredType, createdType)) { return; }
 
         var suggestedCode = BuildSuggestedCode(creation);
-        results.Add(DetectorUtilities.CreateResult(
-            context,
-            this,
-            node,
-            "Use target-typed new when the type is already declared on the left-hand side",
-            suggestedCode,
-            originalCode: creation.ToString()));
+
+        results.Add(
+            DetectorUtilities.CreateResult(
+                context,
+                this,
+                node,
+                "Use target-typed new when the type is already declared on the left-hand side",
+                suggestedCode,
+                originalCode: creation.ToString()));
     }
 
     private static string BuildSuggestedCode(ObjectCreationExpressionSyntax creation)
     {
         var arguments = creation.ArgumentList?.ToString() ?? "()";
         var initializer = creation.Initializer is null ? string.Empty : $" {creation.Initializer}";
+
         return $"new{arguments}{initializer}";
     }
 }

@@ -1,26 +1,24 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Analyzer.Mcp.Tools;
 
 internal sealed class ListRulesTool(AnalyzerService analyzer) : IMcpTool
 {
     public string Name => "list_rules";
+
     public string Description => "List implemented modernization rules with configuration and severity.";
-    public JsonObject InputSchema => new()
-    {
-        ["type"] = "object",
-        ["properties"] = new JsonObject
+
+    public JsonObject InputSchema =>
+        new()
         {
-            ["config_path"] = new JsonObject
-            {
-                ["type"] = "string",
-                ["default"] = ".modernization.yml"
-            }
-        },
-        ["additionalProperties"] = false
-    };
+            ["type"] = "object",
+            ["properties"] = new JsonObject { ["config_path"] = new JsonObject { ["type"] = "string", ["default"] = ".modernization.yml" } },
+            ["additionalProperties"] = false,
+        };
 
     public Task<object> ExecuteAsync(JsonElement arguments, CancellationToken cancellationToken)
     {

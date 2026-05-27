@@ -1,26 +1,32 @@
+using System;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Analyzer.Mcp.Tools;
 
 internal sealed class ApplySuggestionTool(AnalyzerService analyzer) : IMcpTool
 {
     public string Name => "apply_suggestion";
+
     public string Description => "Apply a suggestion in-memory and return the modified source for review.";
-    public JsonObject InputSchema => new()
-    {
-        ["type"] = "object",
-        ["properties"] = new JsonObject
+
+    public JsonObject InputSchema =>
+        new()
         {
-            ["file_path"] = new JsonObject { ["type"] = "string" },
-            ["rule_id"] = new JsonObject { ["type"] = "string" },
-            ["line"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1 },
-            ["config_path"] = new JsonObject { ["type"] = "string", ["default"] = ".modernization.yml" }
-        },
-        ["required"] = new JsonArray("file_path", "rule_id", "line"),
-        ["additionalProperties"] = false
-    };
+            ["type"] = "object",
+            ["properties"] = new JsonObject
+            {
+                ["file_path"] = new JsonObject { ["type"] = "string" },
+                ["rule_id"] = new JsonObject { ["type"] = "string" },
+                ["line"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1 },
+                ["config_path"] = new JsonObject { ["type"] = "string", ["default"] = ".modernization.yml" },
+            },
+            ["required"] = new JsonArray("file_path", "rule_id", "line"),
+            ["additionalProperties"] = false,
+        };
 
     public async Task<object> ExecuteAsync(JsonElement arguments, CancellationToken cancellationToken)
     {
@@ -29,11 +35,12 @@ internal sealed class ApplySuggestionTool(AnalyzerService analyzer) : IMcpTool
             throw new InvalidOperationException("apply_suggestion requires file_path, rule_id, and line.");
         }
 
-        var request = JsonSerializer.Deserialize<ApplySuggestionArguments>(arguments.GetRawText())
-            ?? throw new InvalidOperationException("Invalid apply_suggestion arguments.");
+        var request = JsonSerializer.Deserialize<ApplySuggestionArguments>(arguments.GetRawText()) ??
+                      throw new InvalidOperationException("Invalid apply_suggestion arguments.");
 
         var suggestion = await analyzer.ApplySuggestionAsync(request.FilePath, request.RuleId, request.Line, request.ConfigPath, cancellationToken);
-        return suggestion is null ? (object)new { message = "Suggestion not found." } : suggestion;
+
+        return suggestion ?? (object)new { message = "Suggestion not found." };
     }
 
     private sealed class ApplySuggestionArguments

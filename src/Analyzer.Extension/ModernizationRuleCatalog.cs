@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
 namespace Analyzer.Extension;
 
 internal sealed record ModernizationRule(
@@ -68,12 +72,13 @@ internal static class ModernizationRuleCatalog
         new("MOD009", "Target-typed new", "Typing", "Use `new()` when the target type is already known from context.", "9.0"),
         new("MOD010", "Collection expressions", "Collections", "Use collection expressions (`[...]`) when targeting C# 12.", "12.0"),
         new("MOD011", "Raw string literals", "Strings", "Use raw string literals for multi-line or heavily escaped strings.", "11.0"),
-        new("MOD012", "Primary constructors", "Constructors", "Use primary constructors for straightforward dependency capture.", "12.0")
+        new("MOD012", "Primary constructors", "Constructors", "Use primary constructors for straightforward dependency capture.", "12.0"),
     ];
 
     public static bool TryGet(string ruleId, out ModernizationRule? rule)
     {
         rule = All.FirstOrDefault(candidate => string.Equals(candidate.Id, ruleId, StringComparison.OrdinalIgnoreCase));
+
         return rule is not null;
     }
 }

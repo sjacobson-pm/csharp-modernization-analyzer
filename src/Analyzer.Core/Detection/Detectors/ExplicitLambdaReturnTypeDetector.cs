@@ -1,3 +1,8 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -14,7 +19,9 @@ namespace Analyzer.Core.Detection.Detectors;
 public sealed class ExplicitLambdaReturnTypeDetector : IPatternDetector
 {
     public string RuleId => "MOD013";
+
     public string RuleName => "explicit-lambda-return-type";
+
     public Version MinimumLangVersion => new(10, 0);
 
     public Task<IReadOnlyList<DetectionResult>> DetectAsync(DetectionContext context, CancellationToken cancellationToken = default)
@@ -25,36 +32,34 @@ public sealed class ExplicitLambdaReturnTypeDetector : IPatternDetector
         foreach (var lambda in root.DescendantNodes().OfType<LambdaExpressionSyntax>())
         {
             // Skip lambdas that already have an explicit return type
-            if (lambda is ParenthesizedLambdaExpressionSyntax { ReturnType: not null })
-                continue;
+            if (lambda is ParenthesizedLambdaExpressionSyntax { ReturnType: not null }) { continue; }
 
             // Skip async lambdas — the return type semantics differ (Task<T> wrapping)
-            if (lambda.Modifiers.Any(SyntaxKind.AsyncKeyword))
-                continue;
+            if (lambda.Modifiers.Any(SyntaxKind.AsyncKeyword)) { continue; }
 
             // Only match lambdas whose entire expression body is a cast
-            if (lambda.ExpressionBody is not CastExpressionSyntax castExpr)
-                continue;
+            if (lambda.ExpressionBody is not CastExpressionSyntax castExpr) { continue; }
 
             var castType = castExpr.Type;
             var innerExpression = castExpr.Expression;
 
             var suggested = RewriteLambda(lambda, castType, innerExpression);
-            if (suggested is null)
-                continue;
 
-            results.Add(new DetectionResult
-            {
-                RuleId = RuleId,
-                RuleName = RuleName,
-                Description = $"Use explicit lambda return type '{castType}' instead of cast expression",
-                FilePath = context.FilePath,
-                Span = lambda.Span,
-                LineSpan = lambda.GetLocation().GetLineSpan().Span,
-                OriginalCode = lambda.ToFullString(),
-                SuggestedCode = suggested,
-                Severity = Severity.Suggestion
-            });
+            if (suggested is null) { continue; }
+
+            results.Add(
+                new DetectionResult
+                {
+                    RuleId = this.RuleId,
+                    RuleName = this.RuleName,
+                    Description = $"Use explicit lambda return type '{castType}' instead of cast expression",
+                    FilePath = context.FilePath,
+                    Span = lambda.Span,
+                    LineSpan = lambda.GetLocation().GetLineSpan().Span,
+                    OriginalCode = lambda.ToFullString(),
+                    SuggestedCode = suggested,
+                    Severity = Severity.Suggestion,
+                });
         }
 
         return Task.FromResult<IReadOnlyList<DetectionResult>>(results);
@@ -64,9 +69,7 @@ public sealed class ExplicitLambdaReturnTypeDetector : IPatternDetector
     {
         // Collect modifiers (static, etc.)
         var modifiers = lambda.Modifiers;
-        var modifierText = modifiers.Any()
-            ? string.Join(" ", modifiers.Select(m => m.Text)) + " "
-            : "";
+        var modifierText = modifiers.Any() ? string.Join(" ", modifiers.Select(m => m.Text)) + " " : "";
 
         string parameterList;
 
@@ -75,11 +78,13 @@ public sealed class ExplicitLambdaReturnTypeDetector : IPatternDetector
             case SimpleLambdaExpressionSyntax simple:
                 // simple: path => ... → ReturnType (path) => ...
                 parameterList = $"({simple.Parameter})";
+
                 break;
 
             case ParenthesizedLambdaExpressionSyntax parens:
                 // parens: (path, index) => ... → ReturnType (path, index) => ...
                 parameterList = parens.ParameterList.ToString();
+
                 break;
 
             default:

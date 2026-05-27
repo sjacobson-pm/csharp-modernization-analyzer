@@ -1,3 +1,5 @@
+using System;
+using System.Linq;
 using System.Text;
 
 namespace Analyzer.Extension.Handlers;
@@ -20,10 +22,6 @@ internal sealed class ListRulesHandler
         builder.AppendLine();
         builder.AppendLine("Try `explain MOD004` for a deeper explanation with before/after examples.");
 
-        return new CopilotResponse(
-            "Listing rules",
-            "Loading the available modernization rules",
-            builder.ToString().TrimEnd(),
-            []);
+        return new("Listing rules", "Loading the available modernization rules", builder.ToString().TrimEnd(), []);
     }
 }

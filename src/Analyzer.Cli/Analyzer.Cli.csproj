@@ -1,20 +1,24 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
-    <LangVersion>latest</LangVersion>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <PackAsTool>true</PackAsTool>
-    <ToolCommandName>pm-modernize</ToolCommandName>
-    <PackageId>CSharpModernizer.Cli</PackageId>
-    <Version>0.1.0</Version>
-    <Description>CLI tool for identifying outdated C# language constructs and suggesting modern equivalents</Description>
-  </PropertyGroup>
-  <ItemGroup>
-    <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\Analyzer.Core\Analyzer.Core.csproj" />
-  </ItemGroup>
+
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net10.0</TargetFramework>
+		<LangVersion>latest</LangVersion>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>dus==isable</ImplicitUsings>
+		<PackAsTool>true</PackAsTool>
+		<ToolCommandName>pm-modernize</ToolCommandName>
+		<PackageId>CSharpModernizer.Cli</PackageId>
+		<Version>0.1.0</Version>
+		<Description>CLI tool for identifying outdated C# language constructs and suggesting modern equivalents</Description>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="System.CommandLine" Version="2.0.8" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\Analyzer.Core\Analyzer.Core.csproj" />
+	</ItemGroup>
+
 </Project>

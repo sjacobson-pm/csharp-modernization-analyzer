@@ -1,25 +1,26 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using Analyzer.Extension.Handlers;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 
 namespace Analyzer.Extension;
 
-public sealed class CopilotMessageHandler
+public sealed class CopilotMessageHandler(IHttpClientFactory httpClientFactory, ILogger<CopilotMessageHandler> logger)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    private readonly IntentParser _intentParser = new();
-    private readonly ScanHandler _scanHandler;
-    private readonly ExplainHandler _explainHandler = new();
-    private readonly ListRulesHandler _listRulesHandler = new();
-    private readonly ILogger<CopilotMessageHandler> _logger;
-
-    public CopilotMessageHandler(IHttpClientFactory httpClientFactory, ILogger<CopilotMessageHandler> logger)
-    {
-        _scanHandler = new ScanHandler(httpClientFactory);
-        _logger = logger;
-    }
+    private readonly IntentParser intentParser = new();
+    private readonly ScanHandler scanHandler = new(httpClientFactory);
+    private readonly ExplainHandler explainHandler = new();
+    private readonly ListRulesHandler listRulesHandler = new();
 
     public async Task HandleAsync(HttpContext context)
     {
@@ -27,40 +28,47 @@ public sealed class CopilotMessageHandler
         await ConfigureSseResponseAsync(context.Response, cancellationToken);
 
         CopilotRequestContext requestContext;
-        try
-        {
-            requestContext = await CopilotRequestContext.FromHttpRequestAsync(context.Request, cancellationToken);
-        }
+
+        try { requestContext = await CopilotRequestContext.FromHttpRequestAsync(context.Request, cancellationToken); }
         catch (JsonException ex)
         {
-            _logger.LogWarning(ex, "Received invalid Copilot webhook payload.");
+            logger.LogWarning(ex, "Received invalid Copilot webhook payload.");
             await StreamResponseAsync(context.Response, BuildErrorResponse("I couldn't parse the Copilot webhook payload."), cancellationToken);
+
             return;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to process Copilot webhook payload.");
-            await StreamResponseAsync(context.Response, BuildErrorResponse("Something went wrong while processing the Copilot request."), cancellationToken);
+            logger.LogError(ex, "Failed to process Copilot webhook payload.");
+
+            await StreamResponseAsync(
+                context.Response,
+                BuildErrorResponse("Something went wrong while processing the Copilot request."),
+                cancellationToken);
+
             return;
         }
 
         if (string.IsNullOrWhiteSpace(requestContext.UserMessage))
         {
-            await StreamResponseAsync(context.Response, BuildErrorResponse("I couldn't find the user's message in the webhook payload."), cancellationToken);
+            await StreamResponseAsync(
+                context.Response,
+                BuildErrorResponse("I couldn't find the user's message in the webhook payload."),
+                cancellationToken);
+
             return;
         }
 
-        var intent = _intentParser.Parse(requestContext.UserMessage);
+        var intent = this.intentParser.Parse(requestContext.UserMessage);
 
         var response = intent switch
         {
-            ScanPrIntent scanPrIntent => await _scanHandler.HandleAsync(scanPrIntent, requestContext, cancellationToken),
-            ScanDirectoryIntent scanDirectoryIntent => await _scanHandler.HandleAsync(scanDirectoryIntent, requestContext, cancellationToken),
-            ScanFileIntent scanFileIntent => await _scanHandler.HandleAsync(scanFileIntent, requestContext, cancellationToken),
-            ExplainRuleIntent explainRuleIntent => _explainHandler.Handle(explainRuleIntent),
-            ListRulesIntent listRulesIntent => _listRulesHandler.Handle(listRulesIntent),
-            UnknownIntent _ => BuildHelpResponse(),
-            _ => BuildHelpResponse()
+            ScanPrIntent scanPrIntent => await this.scanHandler.HandleAsync(scanPrIntent, requestContext, cancellationToken),
+            ScanDirectoryIntent scanDirectoryIntent => await this.scanHandler.HandleAsync(scanDirectoryIntent, requestContext, cancellationToken),
+            ScanFileIntent scanFileIntent => await this.scanHandler.HandleAsync(scanFileIntent, requestContext, cancellationToken),
+            ExplainRuleIntent explainRuleIntent => this.explainHandler.Handle(explainRuleIntent),
+            ListRulesIntent listRulesIntent => this.listRulesHandler.Handle(listRulesIntent),
+            _ => BuildHelpResponse(),
         };
 
         await StreamResponseAsync(context.Response, response, cancellationToken);
@@ -78,20 +86,21 @@ public sealed class CopilotMessageHandler
 
     private static async Task StreamResponseAsync(HttpResponse response, CopilotResponse copilotResponse, CancellationToken cancellationToken)
     {
-        await WriteEventAsync(response, new
-        {
-            type = "copilot_confirmation",
-            title = copilotResponse.ConfirmationTitle,
-            message = copilotResponse.ConfirmationMessage
-        }, cancellationToken);
+        await WriteEventAsync(
+            response,
+            new { type = "copilot_confirmation", title = copilotResponse.ConfirmationTitle, message = copilotResponse.ConfirmationMessage },
+            cancellationToken);
 
         if (copilotResponse.References.Count > 0)
         {
-            await WriteEventAsync(response, new
-            {
-                type = "copilot_references",
-                references = copilotResponse.References.Select(reference => new { type = reference.Type, path = reference.Path })
-            }, cancellationToken);
+            await WriteEventAsync(
+                response,
+                new
+                {
+                    type = "copilot_references",
+                    references = copilotResponse.References.Select(reference => new { type = reference.Type, path = reference.Path }),
+                },
+                cancellationToken);
         }
 
         await WriteMarkdownAsync(response, copilotResponse.Content, cancellationToken);
@@ -103,20 +112,7 @@ public sealed class CopilotMessageHandler
     {
         foreach (var chunk in Chunk(markdown, 1800))
         {
-            await WriteEventAsync(response, new
-            {
-                choices = new[]
-                {
-                    new
-                    {
-                        index = 0,
-                        delta = new
-                        {
-                            content = chunk
-                        }
-                    }
-                }
-            }, cancellationToken);
+            await WriteEventAsync(response, new { choices = new[] { new { index = 0, delta = new { content = chunk } } } }, cancellationToken);
         }
     }
 
@@ -132,6 +128,7 @@ public sealed class CopilotMessageHandler
         if (string.IsNullOrEmpty(content))
         {
             yield return string.Empty;
+
             yield break;
         }
 
@@ -140,24 +137,20 @@ public sealed class CopilotMessageHandler
         foreach (var line in content.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
         {
             var candidateLength = builder.Length == 0 ? line.Length : builder.Length + line.Length + 1;
+
             if (candidateLength > maxChunkLength && builder.Length > 0)
             {
                 yield return builder.ToString();
+
                 builder.Clear();
             }
 
-            if (builder.Length > 0)
-            {
-                builder.Append('\n');
-            }
+            if (builder.Length > 0) { builder.Append('\n'); }
 
             builder.Append(line);
         }
 
-        if (builder.Length > 0)
-        {
-            yield return builder.ToString();
-        }
+        if (builder.Length > 0) { yield return builder.ToString(); }
     }
 
     private static CopilotResponse BuildHelpResponse()
@@ -197,14 +190,18 @@ internal sealed record CopilotReference(string Type, string Path);
 internal sealed class CopilotRequestContext
 {
     public required string UserMessage { get; init; }
+
     public string? RepositoryOwner { get; init; }
+
     public string? RepositoryName { get; init; }
+
     public int? PullRequestNumber { get; init; }
+
     public IReadOnlyList<string> ReferencedPaths { get; init; } = [];
 
     public string? RepositoryFullName =>
-        !string.IsNullOrWhiteSpace(RepositoryOwner) && !string.IsNullOrWhiteSpace(RepositoryName)
-            ? $"{RepositoryOwner}/{RepositoryName}"
+        !string.IsNullOrWhiteSpace(this.RepositoryOwner) && !string.IsNullOrWhiteSpace(this.RepositoryName)
+            ? $"{this.RepositoryOwner}/{this.RepositoryName}"
             : null;
 
     public static async Task<CopilotRequestContext> FromHttpRequestAsync(HttpRequest request, CancellationToken cancellationToken)
@@ -218,35 +215,28 @@ internal sealed class CopilotRequestContext
             RepositoryOwner = ExtractRepositoryOwner(root),
             RepositoryName = ExtractRepositoryName(root),
             PullRequestNumber = ExtractPullRequestNumber(root),
-            ReferencedPaths = ExtractReferencedPaths(root)
+            ReferencedPaths = ExtractReferencedPaths(root),
         };
     }
 
     private static string StripMention(string message)
     {
-        if (string.IsNullOrWhiteSpace(message))
-        {
-            return string.Empty;
-        }
+        if (string.IsNullOrWhiteSpace(message)) { return string.Empty; }
 
         return Regex.Replace(message, "@modernize\\b[:;,]?\\s*", string.Empty, RegexOptions.IgnoreCase).Trim();
     }
 
     private static string ExtractLastMessage(JsonElement root)
     {
-        if (!root.TryGetProperty("messages", out var messages) || messages.ValueKind != JsonValueKind.Array)
-        {
-            return string.Empty;
-        }
+        if (!root.TryGetProperty("messages", out var messages) || messages.ValueKind != JsonValueKind.Array) { return string.Empty; }
 
         var lastMessage = string.Empty;
+
         foreach (var message in messages.EnumerateArray())
         {
             var text = ExtractText(message);
-            if (!string.IsNullOrWhiteSpace(text))
-            {
-                lastMessage = text;
-            }
+
+            if (!string.IsNullOrWhiteSpace(text)) { lastMessage = text; }
         }
 
         return lastMessage;
@@ -258,8 +248,10 @@ internal sealed class CopilotRequestContext
         {
             JsonValueKind.String => element.GetString() ?? string.Empty,
             JsonValueKind.Object => ExtractObjectText(element),
-            JsonValueKind.Array => string.Join("\n", element.EnumerateArray().Select(ExtractText).Where(static text => !string.IsNullOrWhiteSpace(text))),
-            _ => string.Empty
+            JsonValueKind.Array => string.Join(
+                "\n",
+                element.EnumerateArray().Select(ExtractText).Where(static text => !string.IsNullOrWhiteSpace(text))),
+            _ => string.Empty,
         };
     }
 
@@ -268,10 +260,8 @@ internal sealed class CopilotRequestContext
         if (element.TryGetProperty("content", out var content))
         {
             var text = ExtractText(content);
-            if (!string.IsNullOrWhiteSpace(text))
-            {
-                return text;
-            }
+
+            if (!string.IsNullOrWhiteSpace(text)) { return text; }
         }
 
         if (element.TryGetProperty("text", out var textProperty) && textProperty.ValueKind == JsonValueKind.String)
@@ -287,10 +277,8 @@ internal sealed class CopilotRequestContext
         if (element.TryGetProperty("parts", out var parts))
         {
             var text = ExtractText(parts);
-            if (!string.IsNullOrWhiteSpace(text))
-            {
-                return text;
-            }
+
+            if (!string.IsNullOrWhiteSpace(text)) { return text; }
         }
 
         return string.Empty;
@@ -298,19 +286,16 @@ internal sealed class CopilotRequestContext
 
     private static string? ExtractRepositoryOwner(JsonElement root)
     {
-        if (!root.TryGetProperty("repository", out var repository) || repository.ValueKind != JsonValueKind.Object)
-        {
-            return null;
-        }
+        if (!root.TryGetProperty("repository", out var repository) || repository.ValueKind != JsonValueKind.Object) { return null; }
 
-        if (repository.TryGetProperty("owner", out var owner) && owner.ValueKind == JsonValueKind.Object && owner.TryGetProperty("login", out var login))
-        {
-            return login.GetString();
-        }
+        if (repository.TryGetProperty("owner", out var owner) &&
+            owner.ValueKind == JsonValueKind.Object &&
+            owner.TryGetProperty("login", out var login)) { return login.GetString(); }
 
         if (repository.TryGetProperty("full_name", out var fullName) && fullName.ValueKind == JsonValueKind.String)
         {
             var parts = (fullName.GetString() ?? string.Empty).Split('/', 2, StringSplitOptions.RemoveEmptyEntries);
+
             return parts.Length == 2 ? parts[0] : null;
         }
 
@@ -319,19 +304,14 @@ internal sealed class CopilotRequestContext
 
     private static string? ExtractRepositoryName(JsonElement root)
     {
-        if (!root.TryGetProperty("repository", out var repository) || repository.ValueKind != JsonValueKind.Object)
-        {
-            return null;
-        }
+        if (!root.TryGetProperty("repository", out var repository) || repository.ValueKind != JsonValueKind.Object) { return null; }
 
-        if (repository.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String)
-        {
-            return name.GetString();
-        }
+        if (repository.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String) { return name.GetString(); }
 
         if (repository.TryGetProperty("full_name", out var fullName) && fullName.ValueKind == JsonValueKind.String)
         {
             var parts = (fullName.GetString() ?? string.Empty).Split('/', 2, StringSplitOptions.RemoveEmptyEntries);
+
             return parts.Length == 2 ? parts[1] : null;
         }
 
@@ -343,10 +323,7 @@ internal sealed class CopilotRequestContext
         if (root.TryGetProperty("pull_request", out var pullRequest) &&
             pullRequest.ValueKind == JsonValueKind.Object &&
             pullRequest.TryGetProperty("number", out var numberProperty) &&
-            numberProperty.TryGetInt32(out var number))
-        {
-            return number;
-        }
+            numberProperty.TryGetInt32(out var number)) { return number; }
 
         return null;
     }
@@ -361,46 +338,32 @@ internal sealed class CopilotRequestContext
         if (root.TryGetProperty("file", out var file))
         {
             var path = ExtractPath(file);
-            if (!string.IsNullOrWhiteSpace(path))
-            {
-                paths.Add(path);
-            }
+
+            if (!string.IsNullOrWhiteSpace(path)) { paths.Add(path); }
         }
 
-        return paths
-            .Where(static path => !string.IsNullOrWhiteSpace(path))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        return paths.Where(static path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     private static void CollectPaths(JsonElement root, string propertyName, List<string> paths)
     {
-        if (!root.TryGetProperty(propertyName, out var collection) || collection.ValueKind != JsonValueKind.Array)
-        {
-            return;
-        }
+        if (!root.TryGetProperty(propertyName, out var collection) || collection.ValueKind != JsonValueKind.Array) { return; }
 
         foreach (var item in collection.EnumerateArray())
         {
             var path = ExtractPath(item);
-            if (!string.IsNullOrWhiteSpace(path))
-            {
-                paths.Add(path);
-            }
+
+            if (!string.IsNullOrWhiteSpace(path)) { paths.Add(path); }
         }
     }
 
     private static string? ExtractPath(JsonElement element)
     {
-        if (element.ValueKind == JsonValueKind.String)
-        {
-            return element.GetString();
-        }
+        if (element.ValueKind == JsonValueKind.String) { return element.GetString(); }
 
-        if (element.ValueKind == JsonValueKind.Object && element.TryGetProperty("path", out var pathProperty) && pathProperty.ValueKind == JsonValueKind.String)
-        {
-            return pathProperty.GetString();
-        }
+        if (element.ValueKind == JsonValueKind.Object &&
+            element.TryGetProperty("path", out var pathProperty) &&
+            pathProperty.ValueKind == JsonValueKind.String) { return pathProperty.GetString(); }
 
         return null;
     }

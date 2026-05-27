@@ -1,5 +1,10 @@
-﻿using System.CommandLine;
+﻿using System;
+using System.Collections.Generic;
+using System.CommandLine;
+using System.IO;
+using System.Linq;
 using System.Text.Json;
+using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Analyzer.Core.Configuration;
@@ -46,10 +51,7 @@ public class Program
         };
 
         command.SetHandler(
-            async (path, full, diff, output, configPath, severity) =>
-            {
-                await ExecuteScanAsync(path, full, diff, output, configPath, severity);
-            },
+            async (path, full, diff, output, configPath, severity) => { await ExecuteScanAsync(path, full, diff, output, configPath, severity); },
             pathArgument,
             fullOption,
             diffOption,
@@ -64,27 +66,15 @@ public class Program
     {
         var initCommand = new Command("init", "Generate a .modernization.yml template");
 
-        initCommand.SetHandler(async () =>
-        {
-            await GenerateConfigTemplateAsync();
-        });
+        initCommand.SetHandler(async () => { await GenerateConfigTemplateAsync(); });
 
         var validateCommand = new Command("validate", "Validate current configuration");
         var configPathOption = new Option<string>("--path", () => ".modernization.yml", "Path to configuration file");
         validateCommand.AddOption(configPathOption);
 
-        validateCommand.SetHandler(
-            async (path) =>
-            {
-                await ValidateConfigAsync(path);
-            },
-            configPathOption);
+        validateCommand.SetHandler(async (path) => { await ValidateConfigAsync(path); }, configPathOption);
 
-        var command = new Command("config", "Configuration management")
-        {
-            initCommand,
-            validateCommand,
-        };
+        var command = new Command("config", "Configuration management") { initCommand, validateCommand };
 
         return command;
     }
@@ -93,15 +83,10 @@ public class Program
     {
         var transportOption = new Option<string>("--transport", () => "stdio", "Transport mode: stdio or http");
         var portOption = new Option<int>("--port", () => 3000, "HTTP port (only used with --transport http)");
-
-        var command = new Command("mcp-serve", "Start MCP server for AI agent integration")
-        {
-            transportOption,
-            portOption,
-        };
+        var command = new Command("mcp-serve", "Start MCP server for AI agent integration") { transportOption, portOption };
 
         command.SetHandler(
-            async (transport, port) =>
+            async (transport, _) =>
             {
                 Console.WriteLine($"Starting MCP server ({transport} transport)...");
                 Console.WriteLine("MCP server implementation pending - see Analyzer.Mcp project");
@@ -141,7 +126,7 @@ public class Program
 
         // Discover files
         Console.WriteLine("  Discovering files...");
-        var files = DiscoverFiles(path, full, diff, config);
+        var files = DiscoverFiles(path, config);
         Console.WriteLine($"    Found {files.Count} C# file(s) to analyze");
         Console.WriteLine();
 
@@ -169,10 +154,7 @@ public class Program
                 var tree = CSharpSyntaxTree.ParseText(sourceText, parseOptions, path: file);
                 syntaxTrees.Add(tree);
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"    ⚠ Could not read: {Path.GetFileName(file)} ({ex.Message})");
-            }
+            catch (Exception ex) { Console.WriteLine($"    ⚠ Could not read: {Path.GetFileName(file)} ({ex.Message})"); }
         }
 
         // Create compilation with basic framework references
@@ -188,9 +170,7 @@ public class Program
         Console.WriteLine($"    Running {detectors.Count} detectors...");
         Console.WriteLine();
 
-        var results = await engine.AnalyzeFilesAsync(
-            files.ToList(),
-            compilation);
+        var results = await engine.AnalyzeFilesAsync(files.ToList(), compilation);
 
         // Filter by severity
         var minSeverity = severity.ToLowerInvariant() switch
@@ -206,20 +186,11 @@ public class Program
         Console.WriteLine("  ─── Results ───────────────────────────────────");
         Console.WriteLine();
 
-        if (filteredResults.Count == 0)
-        {
-            Console.WriteLine("  No modernization opportunities detected.");
-        }
+        if (filteredResults.Count == 0) { Console.WriteLine("  No modernization opportunities detected."); }
         else
         {
-            if (output == "json")
-            {
-                OutputJson(filteredResults);
-            }
-            else
-            {
-                OutputConsole(filteredResults);
-            }
+            if (output == "json") { OutputJson(filteredResults); }
+            else { OutputConsole(filteredResults); }
         }
 
         Console.WriteLine();
@@ -278,10 +249,7 @@ public class Program
         {
             var path = Path.Combine(runtimeDir, asm);
 
-            if (File.Exists(path))
-            {
-                references.Add(MetadataReference.CreateFromFile(path));
-            }
+            if (File.Exists(path)) { references.Add(MetadataReference.CreateFromFile(path)); }
         }
 
         return references;
@@ -337,39 +305,39 @@ public class Program
     private static async Task GenerateConfigTemplateAsync()
     {
         var template = """
-            # .modernization.yml - C# Modernization Analyzer Configuration
-            # Place this file in your repository root.
-            
-            version: 1
-            
-            scan:
-              scope: changed-files          # changed-files | full-repo
-              include:
-                - "src/**/*.cs"
-              exclude:
-                - "**/Migrations/**"
-                - "**/Generated/**"
-                - "**/obj/**"
-                - "**/bin/**"
-            
-            standards:
-              external:
-                - url: "https://your-org.github.io/coding-standards/"
-                  cache-ttl: 24h
-            
-            rules:
-              MOD008:                       # file-scoped namespaces
-                enabled: true
-                severity: suggestion
-              MOD012:                       # primary constructors
-                enabled: false              # disable if org not ready
-            
-            ai:
-              enabled: true
-              provider: openai              # openai | azure-openai | none
-              model: gpt-4o
-              explain: true                 # generate human-readable explanations
-            """;
+                       # .modernization.yml - C# Modernization Analyzer Configuration
+                       # Place this file in your repository root.
+
+                       version: 1
+
+                       scan:
+                         scope: changed-files          # changed-files | full-repo
+                         include:
+                           - "src/**/*.cs"
+                         exclude:
+                           - "**/Migrations/**"
+                           - "**/Generated/**"
+                           - "**/obj/**"
+                           - "**/bin/**"
+
+                       standards:
+                         external:
+                           - url: "https://your-org.github.io/coding-standards/"
+                             cache-ttl: 24h
+
+                       rules:
+                         MOD008:                       # file-scoped namespaces
+                           enabled: true
+                           severity: suggestion
+                         MOD012:                       # primary constructors
+                           enabled: false              # disable if org not ready
+
+                       ai:
+                         enabled: true
+                         provider: openai              # openai | azure-openai | none
+                         model: gpt-4o
+                         explain: true                 # generate human-readable explanations
+                       """;
 
         var outputPath = Path.Combine(Directory.GetCurrentDirectory(), ".modernization.yml");
 
@@ -408,10 +376,7 @@ public class Program
             Console.WriteLine($"    AI enabled: {config.Ai.Enabled}");
             Console.WriteLine($"    External standards: {config.ExternalStandardUrls.Count}");
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"  ✗ Invalid configuration: {ex.Message}");
-        }
+        catch (Exception ex) { Console.WriteLine($"  ✗ Invalid configuration: {ex.Message}"); }
 
         await Task.CompletedTask;
     }
@@ -420,17 +385,11 @@ public class Program
     {
         var dir = Path.GetFullPath(startPath);
 
-        if (File.Exists(dir))
-        {
-            dir = Path.GetDirectoryName(dir)!;
-        }
+        if (File.Exists(dir)) { dir = Path.GetDirectoryName(dir)!; }
 
         while (dir is not null)
         {
-            if (Directory.Exists(Path.Combine(dir, ".git")))
-            {
-                return dir;
-            }
+            if (Directory.Exists(Path.Combine(dir, ".git"))) { return dir; }
 
             dir = Path.GetDirectoryName(dir);
         }
@@ -438,15 +397,12 @@ public class Program
         return Path.GetFullPath(startPath);
     }
 
-    private static List<string> DiscoverFiles(string path, bool full, bool diff, ModernizationConfig config)
+    private static List<string> DiscoverFiles(string path, ModernizationConfig config)
     {
         var resolvedPath = Path.GetFullPath(path);
         var files = new List<string>();
 
-        if (File.Exists(resolvedPath) && resolvedPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-        {
-            files.Add(resolvedPath);
-        }
+        if (File.Exists(resolvedPath) && resolvedPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) { files.Add(resolvedPath); }
         else if (Directory.Exists(resolvedPath))
         {
             var csFiles = Directory.GetFiles(resolvedPath, "*.cs", SearchOption.AllDirectories);

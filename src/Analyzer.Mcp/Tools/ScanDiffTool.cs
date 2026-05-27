@@ -1,31 +1,28 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Analyzer.Mcp.Tools;
 
 internal sealed class ScanDiffTool(AnalyzerService analyzer) : IMcpTool
 {
     public string Name => "scan_diff";
+
     public string Description => "Analyze staged or uncommitted C# changes for modernization opportunities.";
-    public JsonObject InputSchema => new()
-    {
-        ["type"] = "object",
-        ["properties"] = new JsonObject
+
+    public JsonObject InputSchema =>
+        new()
         {
-            ["staged_only"] = new JsonObject
+            ["type"] = "object",
+            ["properties"] = new JsonObject
             {
-                ["type"] = "boolean",
-                ["default"] = false
+                ["staged_only"] = new JsonObject { ["type"] = "boolean", ["default"] = false },
+                ["config_path"] = new JsonObject { ["type"] = "string", ["default"] = ".modernization.yml" },
             },
-            ["config_path"] = new JsonObject
-            {
-                ["type"] = "string",
-                ["default"] = ".modernization.yml"
-            }
-        },
-        ["additionalProperties"] = false
-    };
+            ["additionalProperties"] = false,
+        };
 
     public async Task<object> ExecuteAsync(JsonElement arguments, CancellationToken cancellationToken)
     {

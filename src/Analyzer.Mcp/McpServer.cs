@@ -1,9 +1,15 @@
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Threading;
+using System.Threading.Tasks;
 using Analyzer.Core.Configuration;
 using Analyzer.Core.Detection;
 using Analyzer.Core.Detection.Detectors;
@@ -16,24 +22,22 @@ namespace Analyzer.Mcp;
 public sealed class McpServer
 {
     private const string ProtocolVersion = "2024-11-05";
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        WriteIndented = true
-    };
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
-    private readonly IReadOnlyDictionary<string, IMcpTool> _tools;
+    private readonly IReadOnlyDictionary<string, IMcpTool> tools;
 
     public McpServer()
     {
         var analyzer = new AnalyzerService();
-        _tools = new IMcpTool[]
+
+        this.tools = new IMcpTool[]
         {
             new Tools.ScanFilesTool(analyzer),
             new Tools.ScanDiffTool(analyzer),
             new Tools.GetSuggestionTool(analyzer),
             new Tools.ApplySuggestionTool(analyzer),
             new Tools.ListRulesTool(analyzer),
-            new Tools.GetStandardsTool(analyzer)
+            new Tools.GetStandardsTool(analyzer),
         }.ToDictionary(static tool => tool.Name, StringComparer.OrdinalIgnoreCase);
     }
 
@@ -41,9 +45,9 @@ public sealed class McpServer
     {
         return transport.ToLowerInvariant() switch
         {
-            "stdio" => RunStdioAsync(Console.OpenStandardInput(), Console.OpenStandardOutput(), cancellationToken),
-            "http" or "sse" => RunHttpAsync(port, cancellationToken),
-            _ => throw new InvalidOperationException($"Unsupported transport '{transport}'. Expected 'stdio' or 'http'.")
+            "stdio" => this.RunStdioAsync(Console.OpenStandardInput(), Console.OpenStandardOutput(), cancellationToken),
+            "http" or "sse" => this.RunHttpAsync(port, cancellationToken),
+            _ => throw new InvalidOperationException($"Unsupported transport '{transport}'. Expected 'stdio' or 'http'."),
         };
     }
 
@@ -53,27 +57,20 @@ public sealed class McpServer
         {
             string? requestJson;
 
-            try
-            {
-                requestJson = await ReadMessageAsync(input, cancellationToken);
-            }
+            try { requestJson = await ReadMessageAsync(input, cancellationToken); }
             catch (Exception ex)
             {
-                var parseError = SerializeErrorResponse(default(JsonElement?), -32700, ex.Message);
+                var parseError = SerializeErrorResponse(default, -32700, ex.Message);
                 await WriteMessageAsync(output, parseError, cancellationToken);
+
                 continue;
             }
 
-            if (requestJson is null)
-            {
-                break;
-            }
+            if (requestJson is null) { break; }
 
-            var responseJson = await HandleRequestAsync(requestJson, cancellationToken);
-            if (responseJson is null)
-            {
-                continue;
-            }
+            var responseJson = await this.HandleRequestAsync(requestJson, cancellationToken);
+
+            if (responseJson is null) { continue; }
 
             await WriteMessageAsync(output, responseJson, cancellationToken);
         }
@@ -91,12 +88,10 @@ public sealed class McpServer
             {
                 var contextTask = listener.GetContextAsync();
                 var completed = await Task.WhenAny(contextTask, Task.Delay(Timeout.Infinite, cancellationToken));
-                if (completed != contextTask)
-                {
-                    break;
-                }
 
-                _ = HandleHttpContextAsync(await contextTask, cancellationToken);
+                if (completed != contextTask) { break; }
+
+                _ = this.HandleHttpContextAsync(await contextTask, cancellationToken);
             }
         }
         finally
@@ -120,13 +115,13 @@ public sealed class McpServer
                 await using var writer = new StreamWriter(context.Response.OutputStream, new UTF8Encoding(false), leaveOpen: true);
                 await writer.WriteAsync("event: endpoint\n");
                 await writer.WriteAsync("data: /mcp\n\n");
-                await writer.FlushAsync();
+                await writer.FlushAsync(cancellationToken);
 
                 while (!cancellationToken.IsCancellationRequested)
                 {
                     await Task.Delay(TimeSpan.FromSeconds(15), cancellationToken);
                     await writer.WriteAsync(": keep-alive\n\n");
-                    await writer.FlushAsync();
+                    await writer.FlushAsync(cancellationToken);
                 }
 
                 return;
@@ -137,17 +132,19 @@ public sealed class McpServer
             {
                 context.Response.StatusCode = (int)HttpStatusCode.NotFound;
                 context.Response.Close();
+
                 return;
             }
 
             using var reader = new StreamReader(context.Request.InputStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
             var requestJson = await reader.ReadToEndAsync(cancellationToken);
-            var responseJson = await HandleRequestAsync(requestJson, cancellationToken);
+            var responseJson = await this.HandleRequestAsync(requestJson, cancellationToken);
 
             if (responseJson is null)
             {
                 context.Response.StatusCode = (int)HttpStatusCode.NoContent;
                 context.Response.Close();
+
                 return;
             }
 
@@ -160,15 +157,9 @@ public sealed class McpServer
         }
         catch (OperationCanceledException)
         {
-            if (context.Response.OutputStream.CanWrite)
-            {
-                context.Response.Close();
-            }
+            if (context.Response.OutputStream.CanWrite) { context.Response.Close(); }
         }
-        catch (HttpListenerException)
-        {
-            context.Response.Close();
-        }
+        catch (HttpListenerException) { context.Response.Close(); }
     }
 
     internal async Task<string?> HandleRequestAsync(string requestJson, CancellationToken cancellationToken)
@@ -182,88 +173,59 @@ public sealed class McpServer
 
             if (!root.TryGetProperty("method", out var methodProperty) || methodProperty.ValueKind != JsonValueKind.String)
             {
-                return SerializeErrorResponse(root.TryGetProperty("id", out var missingMethodId) ? missingMethodId : (JsonElement?)null, -32600, "Missing JSON-RPC method.");
+                return SerializeErrorResponse(
+                    root.TryGetProperty("id", out var missingMethodId) ? missingMethodId : null,
+                    -32600,
+                    "Missing JSON-RPC method.");
             }
 
             var hasId = root.TryGetProperty("id", out var idProperty);
             var method = methodProperty.GetString()!;
 
-            if (!hasId && method.StartsWith("notifications/", StringComparison.OrdinalIgnoreCase))
-            {
-                return null;
-            }
+            if (!hasId && method.StartsWith("notifications/", StringComparison.OrdinalIgnoreCase)) { return null; }
 
-            object result = method switch
+            var result = method switch
             {
                 "initialize" => BuildInitializeResult(),
-                "tools/list" => BuildToolsListResult(),
-                "tools/call" => await HandleToolsCallAsync(root, cancellationToken),
+                "tools/list" => this.BuildToolsListResult(),
+                "tools/call" => await this.HandleToolsCallAsync(root, cancellationToken),
                 "ping" => new { },
-                _ => throw new JsonRpcException(-32601, $"Method '{method}' is not supported.")
+                _ => throw new JsonRpcException(-32601, $"Method '{method}' is not supported."),
             };
 
-            if (!hasId)
-            {
-                return null;
-            }
+            if (!hasId) { return null; }
 
-            return JsonSerializer.Serialize(new
-            {
-                jsonrpc = "2.0",
-                id = idProperty.Clone(),
-                result
-            }, JsonOptions);
+            return JsonSerializer.Serialize(new { jsonrpc = "2.0", id = idProperty.Clone(), result }, JsonOptions);
         }
         catch (JsonRpcException ex)
         {
-            return SerializeErrorResponse(document?.RootElement.TryGetProperty("id", out var id) == true ? id : (JsonElement?)null, ex.Code, ex.Message);
+            return SerializeErrorResponse(document?.RootElement.TryGetProperty("id", out var id) == true ? id : null, ex.Code, ex.Message);
         }
         catch (JsonException ex)
         {
-            return SerializeErrorResponse(document?.RootElement.TryGetProperty("id", out var id) == true ? id : (JsonElement?)null, -32700, ex.Message);
+            return SerializeErrorResponse(document?.RootElement.TryGetProperty("id", out var id) == true ? id : null, -32700, ex.Message);
         }
         catch (Exception ex)
         {
-            return SerializeErrorResponse(document?.RootElement.TryGetProperty("id", out var id) == true ? id : (JsonElement?)null, -32603, ex.Message);
+            return SerializeErrorResponse(document?.RootElement.TryGetProperty("id", out var id) == true ? id : null, -32603, ex.Message);
         }
-        finally
-        {
-            document?.Dispose();
-        }
+        finally { document?.Dispose(); }
     }
 
-    private object BuildInitializeResult()
-    {
-        return new
+    private static object BuildInitializeResult() =>
+        new
         {
             protocolVersion = ProtocolVersion,
-            capabilities = new
-            {
-                tools = new
-                {
-                    listChanged = false
-                }
-            },
-            serverInfo = new
-            {
-                name = "csharp-modernization-analyzer",
-                version = "0.1.0"
-            }
+            capabilities = new { tools = new { listChanged = false } },
+            serverInfo = new { name = "csharp-modernization-analyzer", version = "0.1.0" },
         };
-    }
 
-    private object BuildToolsListResult()
-    {
-        return new
+    private object BuildToolsListResult() =>
+        new
         {
-            tools = _tools.Values.Select(static tool => new
-            {
-                name = tool.Name,
-                description = tool.Description,
-                inputSchema = tool.InputSchema
-            })
+            tools = this.tools.Values.Select(static tool =>
+                new { name = tool.Name, description = tool.Description, inputSchema = tool.InputSchema }),
         };
-    }
 
     private async Task<object> HandleToolsCallAsync(JsonElement request, CancellationToken cancellationToken)
     {
@@ -278,68 +240,30 @@ public sealed class McpServer
         }
 
         var toolName = nameElement.GetString()!;
-        if (!_tools.TryGetValue(toolName, out var tool))
-        {
-            return CreateToolErrorResult($"Unknown tool '{toolName}'.");
-        }
 
-        var arguments = paramsElement.TryGetProperty("arguments", out var argumentsElement)
-            ? argumentsElement
-            : default;
+        if (!this.tools.TryGetValue(toolName, out var tool)) { return CreateToolErrorResult($"Unknown tool '{toolName}'."); }
+
+        var arguments = paramsElement.TryGetProperty("arguments", out var argumentsElement) ? argumentsElement : default;
 
         try
         {
             var result = await tool.ExecuteAsync(arguments, cancellationToken);
+
             return new
             {
-                content = new[]
-                {
-                    new
-                    {
-                        type = "text",
-                        text = JsonSerializer.Serialize(result, JsonOptions)
-                    }
-                },
-                structuredContent = result
+                content = new[] { new { type = "text", text = JsonSerializer.Serialize(result, JsonOptions) } }, structuredContent = result,
             };
         }
-        catch (Exception ex)
-        {
-            return CreateToolErrorResult(ex.Message);
-        }
+        catch (Exception ex) { return CreateToolErrorResult(ex.Message); }
     }
 
-    private static object CreateToolErrorResult(string message)
-    {
-        return new
-        {
-            content = new[]
-            {
-                new
-                {
-                    type = "text",
-                    text = message
-                }
-            },
-            isError = true
-        };
-    }
+    private static object CreateToolErrorResult(string message) => new { content = new[] { new { type = "text", text = message } }, isError = true };
 
     private static string SerializeErrorResponse(JsonElement? idElement, int code, string message)
     {
-        object? id = idElement is null || idElement.Value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null
-            ? null
-            : idElement.Value.Clone();
-        return JsonSerializer.Serialize(new
-        {
-            jsonrpc = "2.0",
-            id,
-            error = new
-            {
-                code,
-                message
-            }
-        }, JsonOptions);
+        object? id = idElement is null || idElement.Value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null ? null : idElement.Value.Clone();
+
+        return JsonSerializer.Serialize(new { jsonrpc = "2.0", id, error = new { code, message } }, JsonOptions);
     }
 
     private static async Task<string?> ReadMessageAsync(Stream stream, CancellationToken cancellationToken)
@@ -349,32 +273,28 @@ public sealed class McpServer
         while (true)
         {
             var line = await ReadLineAsync(stream, cancellationToken);
+
             if (line is null)
             {
                 return headers.Count == 0 ? null : throw new EndOfStreamException("Unexpected end of stream while reading headers.");
             }
 
-            if (line.Length == 0)
-            {
-                break;
-            }
+            if (line.Length == 0) { break; }
 
             var separatorIndex = line.IndexOf(':');
-            if (separatorIndex <= 0)
-            {
-                throw new InvalidDataException($"Invalid header line '{line}'.");
-            }
+
+            if (separatorIndex <= 0) { throw new InvalidDataException($"Invalid header line '{line}'."); }
 
             headers[line[..separatorIndex].Trim()] = line[(separatorIndex + 1)..].Trim();
         }
 
-        if (!headers.TryGetValue("Content-Length", out var contentLengthValue) || !int.TryParse(contentLengthValue, out var contentLength) || contentLength < 0)
-        {
-            throw new InvalidDataException("Missing or invalid Content-Length header.");
-        }
+        if (!headers.TryGetValue("Content-Length", out var contentLengthValue) ||
+            !int.TryParse(contentLengthValue, out var contentLength) ||
+            contentLength < 0) { throw new InvalidDataException("Missing or invalid Content-Length header."); }
 
         var buffer = new byte[contentLength];
         await ReadExactlyAsync(stream, buffer, cancellationToken);
+
         return Encoding.UTF8.GetString(buffer);
     }
 
@@ -386,25 +306,17 @@ public sealed class McpServer
         while (true)
         {
             var read = await stream.ReadAsync(buffer.AsMemory(0, 1), cancellationToken);
+
             if (read == 0)
             {
-                if (bytes.Count == 0)
-                {
-                    return null;
-                }
+                if (bytes.Count == 0) { return null; }
 
                 break;
             }
 
-            if (buffer[0] == (byte)'\n')
-            {
-                break;
-            }
+            if (buffer[0] == (byte)'\n') { break; }
 
-            if (buffer[0] != (byte)'\r')
-            {
-                bytes.Add(buffer[0]);
-            }
+            if (buffer[0] != (byte)'\r') { bytes.Add(buffer[0]); }
         }
 
         return Encoding.ASCII.GetString(bytes.ToArray());
@@ -413,13 +325,12 @@ public sealed class McpServer
     private static async Task ReadExactlyAsync(Stream stream, byte[] buffer, CancellationToken cancellationToken)
     {
         var offset = 0;
+
         while (offset < buffer.Length)
         {
             var read = await stream.ReadAsync(buffer.AsMemory(offset), cancellationToken);
-            if (read == 0)
-            {
-                throw new EndOfStreamException("Unexpected end of stream while reading message payload.");
-            }
+
+            if (read == 0) { throw new EndOfStreamException("Unexpected end of stream while reading message payload."); }
 
             offset += read;
         }
@@ -438,8 +349,11 @@ public sealed class McpServer
 internal interface IMcpTool
 {
     string Name { get; }
+
     string Description { get; }
+
     JsonObject InputSchema { get; }
+
     Task<object> ExecuteAsync(JsonElement arguments, CancellationToken cancellationToken);
 }
 
@@ -458,24 +372,26 @@ internal sealed class AnalyzerService
         new TargetTypedNewDetector(),
         new CollectionExpressionDetector(),
         new RawStringLiteralDetector(),
-        new PrimaryConstructorDetector()
+        new PrimaryConstructorDetector(),
     ];
 
     private static readonly Lazy<IReadOnlyList<MetadataReference>> MetadataReferences = new(CreateMetadataReferences);
-    private readonly PatchGenerator _patchGenerator = new();
+    private readonly PatchGenerator patchGenerator = new();
 
-    public async Task<IReadOnlyList<SuggestionResponse>> ScanFilesAsync(IReadOnlyList<string> inputPaths, string? configPath, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<SuggestionResponse>> ScanFilesAsync(
+        IReadOnlyList<string> inputPaths,
+        string? configPath,
+        CancellationToken cancellationToken)
     {
         var repoRoot = FindRepoRoot(Directory.GetCurrentDirectory());
         var config = LoadConfig(repoRoot, configPath);
         var files = ExpandInputPaths(inputPaths, repoRoot, config);
         var analysis = await AnalyzeAsync(repoRoot, config, files, cancellationToken);
 
-        return analysis.Results
-            .OrderBy(static result => result.FilePath, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(static result => result.LineSpan.Start.Line)
-            .Select(result => ToSuggestionResponse(result, repoRoot, config))
-            .ToList();
+        return analysis.Results.OrderBy(static result => result.FilePath, StringComparer.OrdinalIgnoreCase)
+                       .ThenBy(static result => result.LineSpan.Start.Line)
+                       .Select(result => this.ToSuggestionResponse(result, repoRoot, config))
+                       .ToList();
     }
 
     public async Task<IReadOnlyList<SuggestionResponse>> ScanDiffAsync(bool stagedOnly, string? configPath, CancellationToken cancellationToken)
@@ -485,38 +401,46 @@ internal sealed class AnalyzerService
         var changedFiles = await GetChangedFilesAsync(repoRoot, stagedOnly, cancellationToken);
         var analysis = await AnalyzeAsync(repoRoot, config, changedFiles, cancellationToken);
 
-        return analysis.Results
-            .OrderBy(static result => result.FilePath, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(static result => result.LineSpan.Start.Line)
-            .Select(result => ToSuggestionResponse(result, repoRoot, config))
-            .ToList();
+        return analysis.Results.OrderBy(static result => result.FilePath, StringComparer.OrdinalIgnoreCase)
+                       .ThenBy(static result => result.LineSpan.Start.Line)
+                       .Select(result => this.ToSuggestionResponse(result, repoRoot, config))
+                       .ToList();
     }
 
-    public async Task<SuggestionResponse?> GetSuggestionAsync(string filePath, string ruleId, int line, string? configPath, CancellationToken cancellationToken)
+    public async Task<SuggestionResponse?> GetSuggestionAsync(
+        string filePath,
+        string ruleId,
+        int line,
+        string? configPath,
+        CancellationToken cancellationToken)
     {
         var repoRoot = FindRepoRoot(ResolvePath(filePath, Directory.GetCurrentDirectory()));
         var config = LoadConfig(repoRoot, configPath);
         var absolutePath = ResolvePath(filePath, repoRoot);
         var analysis = await AnalyzeAsync(repoRoot, config, [absolutePath], cancellationToken);
         var match = FindMatchingSuggestion(analysis.Results, absolutePath, ruleId, line);
-        return match is null ? null : ToSuggestionResponse(match, repoRoot, config);
+
+        return match is null ? null : this.ToSuggestionResponse(match, repoRoot, config);
     }
 
-    public async Task<ApplySuggestionResponse?> ApplySuggestionAsync(string filePath, string ruleId, int line, string? configPath, CancellationToken cancellationToken)
+    public async Task<ApplySuggestionResponse?> ApplySuggestionAsync(
+        string filePath,
+        string ruleId,
+        int line,
+        string? configPath,
+        CancellationToken cancellationToken)
     {
         var repoRoot = FindRepoRoot(ResolvePath(filePath, Directory.GetCurrentDirectory()));
         var config = LoadConfig(repoRoot, configPath);
         var absolutePath = ResolvePath(filePath, repoRoot);
         var analysis = await AnalyzeAsync(repoRoot, config, [absolutePath], cancellationToken);
         var match = FindMatchingSuggestion(analysis.Results, absolutePath, ruleId, line);
-        if (match is null)
-        {
-            return null;
-        }
+
+        if (match is null) { return null; }
 
         var source = await File.ReadAllTextAsync(absolutePath, cancellationToken);
         var modified = ApplySuggestion(source, match);
-        var suggestion = ToSuggestionResponse(match, repoRoot, config);
+        var suggestion = this.ToSuggestionResponse(match, repoRoot, config);
 
         return new ApplySuggestionResponse
         {
@@ -526,7 +450,7 @@ internal sealed class AnalyzerService
             ModifiedSource = modified,
             BeforeCode = suggestion.BeforeCode,
             AfterCode = suggestion.AfterCode,
-            UnifiedDiff = suggestion.UnifiedDiff
+            UnifiedDiff = suggestion.UnifiedDiff,
         };
     }
 
@@ -535,18 +459,17 @@ internal sealed class AnalyzerService
         var repoRoot = FindRepoRoot(Directory.GetCurrentDirectory());
         var config = LoadConfig(repoRoot, configPath);
 
-        return Detectors
-            .OrderBy(static detector => detector.RuleId, StringComparer.OrdinalIgnoreCase)
-            .Select(detector => new RuleResponse
-            {
-                RuleId = detector.RuleId,
-                RuleName = detector.RuleName,
-                Description = DescribeRule(detector.RuleId),
-                Enabled = config.IsRuleEnabled(detector.RuleId),
-                Severity = ToSeverityText(config.GetRuleSeverity(detector.RuleId) ?? Severity.Suggestion),
-                MinLanguageVersion = $"{detector.MinimumLangVersion.Major}.{detector.MinimumLangVersion.Minor}"
-            })
-            .ToList();
+        return Detectors.OrderBy(static detector => detector.RuleId, StringComparer.OrdinalIgnoreCase)
+                        .Select(detector => new RuleResponse
+                         {
+                             RuleId = detector.RuleId,
+                             RuleName = detector.RuleName,
+                             Description = DescribeRule(detector.RuleId),
+                             Enabled = config.IsRuleEnabled(detector.RuleId),
+                             Severity = ToSeverityText(config.GetRuleSeverity(detector.RuleId) ?? Severity.Suggestion),
+                             MinLanguageVersion = $"{detector.MinimumLangVersion.Major}.{detector.MinimumLangVersion.Minor}",
+                         })
+                        .ToList();
     }
 
     public StandardsResponse GetStandards(string repoPath, string? configPath)
@@ -562,75 +485,56 @@ internal sealed class AnalyzerService
         var response = new StandardsResponse
         {
             RepoPath = NormalizePath(Path.GetRelativePath(Directory.GetCurrentDirectory(), repoRoot)),
-            EditorConfig = new StandardsSourceResponse
-            {
-                Found = File.Exists(editorConfigPath),
-                Path = File.Exists(editorConfigPath) ? ".editorconfig" : null,
-                Details = File.Exists(editorConfigPath)
-                    ? $"{CountEditorConfigPreferences(editorConfigPath)} C# preferences found"
-                    : null
-            },
+            EditorConfig =
+                new StandardsSourceResponse
+                {
+                    Found = File.Exists(editorConfigPath),
+                    Path = File.Exists(editorConfigPath) ? ".editorconfig" : null,
+                    Details = File.Exists(editorConfigPath) ? $"{CountEditorConfigPreferences(editorConfigPath)} C# preferences found" : null,
+                },
             StyleCop = new StandardsSourceResponse
             {
                 Found = File.Exists(styleCopPath),
                 Path = File.Exists(styleCopPath) ? "stylecop.json" : null,
-                Details = File.Exists(styleCopPath) ? "StyleCop settings file found" : null
+                Details = File.Exists(styleCopPath) ? "StyleCop settings file found" : null,
             },
             RuleSetFiles = ruleSetFiles.Select(path => NormalizePath(Path.GetRelativePath(repoRoot, path))).ToList(),
             GlobalConfigFiles = globalConfigFiles.Select(path => NormalizePath(Path.GetRelativePath(repoRoot, path))).ToList(),
-            ExternalStandards = config.ExternalStandardUrls.Select(static url => new ExternalStandardResponse
-            {
-                Url = url
-            }).ToList()
+            ExternalStandards = config.ExternalStandardUrls.Select(static url => new ExternalStandardResponse { Url = url }).ToList(),
         };
 
-        if (response.EditorConfig.Found)
-        {
-            response.ActiveSources.Add("editorconfig");
-        }
+        if (response.EditorConfig.Found) { response.ActiveSources.Add("editorconfig"); }
 
-        if (response.StyleCop.Found)
-        {
-            response.ActiveSources.Add("stylecop");
-        }
+        if (response.StyleCop.Found) { response.ActiveSources.Add("stylecop"); }
 
-        if (response.RuleSetFiles.Count > 0 || response.GlobalConfigFiles.Count > 0)
-        {
-            response.ActiveSources.Add("analyzer-config");
-        }
+        if (response.RuleSetFiles.Count > 0 || response.GlobalConfigFiles.Count > 0) { response.ActiveSources.Add("analyzer-config"); }
 
-        if (response.ExternalStandards.Count > 0)
-        {
-            response.ActiveSources.Add("external-standards");
-        }
+        if (response.ExternalStandards.Count > 0) { response.ActiveSources.Add("external-standards"); }
 
         return response;
     }
 
-    private static async Task<AnalysisResult> AnalyzeAsync(string repoRoot, ModernizationConfig config, IReadOnlyList<string> files, CancellationToken cancellationToken)
+    private static async Task<AnalysisResult> AnalyzeAsync(
+        string repoRoot,
+        ModernizationConfig config,
+        IReadOnlyList<string> files,
+        CancellationToken cancellationToken)
     {
-        var filteredFiles = files
-            .Where(File.Exists)
-            .Where(static path => path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-            .Where(path => !config.IsExcluded(path))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var filteredFiles = files.Where(File.Exists)
+                                 .Where(static path => path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+                                 .Where(path => !config.IsExcluded(path))
+                                 .Distinct(StringComparer.OrdinalIgnoreCase)
+                                 .ToList();
 
-        if (filteredFiles.Count == 0)
-        {
-            return new AnalysisResult { Results = [] };
-        }
+        if (filteredFiles.Count == 0) { return new AnalysisResult { Results = [] }; }
 
-        var standardsResolver = new Analyzer.Core.Standards.StandardsResolver();
+        var standardsResolver = new Core.Standards.StandardsResolver();
         var standards = await standardsResolver.ResolveAsync(repoRoot, config, cancellationToken);
         var compilation = await BuildCompilationAsync(filteredFiles, cancellationToken);
         var engine = new DetectionEngine(Detectors, standards, config);
         var results = await engine.AnalyzeFilesAsync(filteredFiles, compilation, cancellationToken);
 
-        return new AnalysisResult
-        {
-            Results = results
-        };
+        return new AnalysisResult { Results = results };
     }
 
     private static async Task<CSharpCompilation> BuildCompilationAsync(IReadOnlyList<string> files, CancellationToken cancellationToken)
@@ -658,41 +562,34 @@ internal sealed class AnalyzerService
         foreach (var inputPath in inputPaths)
         {
             var resolvedPath = ResolvePath(inputPath, repoRoot);
+
             if (File.Exists(resolvedPath) && resolvedPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
             {
                 files.Add(resolvedPath);
+
                 continue;
             }
 
-            if (!Directory.Exists(resolvedPath))
-            {
-                continue;
-            }
+            if (!Directory.Exists(resolvedPath)) { continue; }
 
             foreach (var file in Directory.GetFiles(resolvedPath, "*.cs", SearchOption.AllDirectories))
             {
-                if (!config.IsExcluded(file))
-                {
-                    files.Add(file);
-                }
+                if (!config.IsExcluded(file)) { files.Add(file); }
             }
         }
 
         return files.ToList();
     }
 
-    private static DetectionResult? FindMatchingSuggestion(IEnumerable<DetectionResult> results, string absolutePath, string ruleId, int line)
-    {
-        return results.FirstOrDefault(result =>
+    private static DetectionResult? FindMatchingSuggestion(IEnumerable<DetectionResult> results, string absolutePath, string ruleId, int line) =>
+        results.FirstOrDefault(result =>
             result.FilePath.Equals(absolutePath, StringComparison.OrdinalIgnoreCase) &&
             result.RuleId.Equals(ruleId, StringComparison.OrdinalIgnoreCase) &&
             line >= result.LineSpan.Start.Line + 1 &&
             line <= result.LineSpan.End.Line + 1);
-    }
 
-    private SuggestionResponse ToSuggestionResponse(DetectionResult result, string repoRoot, ModernizationConfig config)
-    {
-        return new SuggestionResponse
+    private SuggestionResponse ToSuggestionResponse(DetectionResult result, string repoRoot, ModernizationConfig config) =>
+        new()
         {
             RuleId = result.RuleId,
             RuleName = result.RuleName,
@@ -706,25 +603,21 @@ internal sealed class AnalyzerService
                 : result.Explanation!,
             BeforeCode = result.OriginalCode,
             AfterCode = result.SuggestedCode,
-            UnifiedDiff = _patchGenerator.GenerateUnifiedDiff(result)
+            UnifiedDiff = this.patchGenerator.GenerateUnifiedDiff(result),
         };
-    }
 
-    private static string ApplySuggestion(string source, DetectionResult result)
-    {
-        return string.Concat(source.AsSpan(0, result.Span.Start), result.SuggestedCode, source.AsSpan(result.Span.End));
-    }
+    private static string ApplySuggestion(string source, DetectionResult result) =>
+        string.Concat(source.AsSpan(0, result.Span.Start), result.SuggestedCode, source.AsSpan(result.Span.End));
 
     private static ModernizationConfig LoadConfig(string repoRoot, string? configPath)
     {
         var resolvedConfigPath = ResolvePath(string.IsNullOrWhiteSpace(configPath) ? ".modernization.yml" : configPath, repoRoot);
+
         return ModernizationConfig.LoadFromFile(resolvedConfigPath);
     }
 
-    private static string ResolvePath(string path, string basePath)
-    {
-        return Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(basePath, path));
-    }
+    private static string ResolvePath(string path, string basePath) =>
+        Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(basePath, path));
 
     private static string FindRepoRoot(string startPath)
     {
@@ -733,10 +626,7 @@ internal sealed class AnalyzerService
 
         while (!string.IsNullOrEmpty(current))
         {
-            if (Directory.Exists(Path.Combine(current, ".git")))
-            {
-                return current;
-            }
+            if (Directory.Exists(Path.Combine(current, ".git"))) { return current; }
 
             current = Path.GetDirectoryName(current);
         }
@@ -747,19 +637,19 @@ internal sealed class AnalyzerService
     private static IReadOnlyList<MetadataReference> CreateMetadataReferences()
     {
         var trustedAssemblies = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string;
+
         if (!string.IsNullOrWhiteSpace(trustedAssemblies))
         {
-            return trustedAssemblies
-                .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-                .Select(static path => (MetadataReference)MetadataReference.CreateFromFile(path))
-                .ToList();
+            return trustedAssemblies.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+                                    .Select(static MetadataReference (path) => MetadataReference.CreateFromFile(path))
+                                    .ToList();
         }
 
         return
         [
             MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
             MetadataReference.CreateFromFile(typeof(Enumerable).Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(Console).Assembly.Location)
+            MetadataReference.CreateFromFile(typeof(Console).Assembly.Location),
         ];
     }
 
@@ -767,28 +657,31 @@ internal sealed class AnalyzerService
     {
         var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var relativePath in await RunGitLinesAsync(repoRoot, ["diff", "--name-only", "--cached", "--diff-filter=ACMR", "--", "*.cs"], cancellationToken))
-        {
-            files.Add(ResolvePath(relativePath, repoRoot));
-        }
+        foreach (var relativePath in await RunGitLinesAsync(
+                     repoRoot,
+                     ["diff", "--name-only", "--cached", "--diff-filter=ACMR", "--", "*.cs"],
+                     cancellationToken)) { files.Add(ResolvePath(relativePath, repoRoot)); }
 
         if (!stagedOnly)
         {
-            foreach (var relativePath in await RunGitLinesAsync(repoRoot, ["diff", "--name-only", "--diff-filter=ACMR", "--", "*.cs"], cancellationToken))
-            {
-                files.Add(ResolvePath(relativePath, repoRoot));
-            }
+            foreach (var relativePath in await RunGitLinesAsync(
+                         repoRoot,
+                         ["diff", "--name-only", "--diff-filter=ACMR", "--", "*.cs"],
+                         cancellationToken)) { files.Add(ResolvePath(relativePath, repoRoot)); }
 
-            foreach (var relativePath in await RunGitLinesAsync(repoRoot, ["ls-files", "--others", "--exclude-standard", "--", "*.cs"], cancellationToken))
-            {
-                files.Add(ResolvePath(relativePath, repoRoot));
-            }
+            foreach (var relativePath in await RunGitLinesAsync(
+                         repoRoot,
+                         ["ls-files", "--others", "--exclude-standard", "--", "*.cs"],
+                         cancellationToken)) { files.Add(ResolvePath(relativePath, repoRoot)); }
         }
 
         return files.ToList();
     }
 
-    private static async Task<IReadOnlyList<string>> RunGitLinesAsync(string workingDirectory, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<string>> RunGitLinesAsync(
+        string workingDirectory,
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken)
     {
         var startInfo = new ProcessStartInfo("git")
         {
@@ -796,13 +689,10 @@ internal sealed class AnalyzerService
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
         };
 
-        foreach (var argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
+        foreach (var argument in arguments) { startInfo.ArgumentList.Add(argument); }
 
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start git process.");
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
@@ -812,25 +702,25 @@ internal sealed class AnalyzerService
         var stdout = await stdoutTask;
         var stderr = await stderrTask;
 
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? "Git diff failed." : stderr.Trim());
-        }
+        if (process.ExitCode != 0) { throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? "Git diff failed." : stderr.Trim()); }
 
-        return stdout
-            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
-            .Select(static line => line.Trim())
-            .Where(static line => !string.IsNullOrWhiteSpace(line))
-            .ToList();
+        return stdout.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+                     .Select(static line => line.Trim())
+                     .Where(static line => !string.IsNullOrWhiteSpace(line))
+                     .ToList();
     }
 
     private static IReadOnlyList<string> SafeGetFiles(string rootPath, string searchPattern)
     {
         return Directory.Exists(rootPath)
             ? Directory.GetFiles(rootPath, searchPattern, SearchOption.AllDirectories)
-                .Where(static path => !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
-                .Where(static path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
-                .ToList()
+                       .Where(static path => !path.Contains(
+                            $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
+                            StringComparison.OrdinalIgnoreCase))
+                       .Where(static path => !path.Contains(
+                            $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+                            StringComparison.OrdinalIgnoreCase))
+                       .ToList()
             : [];
     }
 
@@ -843,16 +733,16 @@ internal sealed class AnalyzerService
         foreach (var line in lines)
         {
             var trimmed = line.Trim();
+
             if (trimmed.StartsWith('['))
             {
-                inCSharpSection = trimmed.Contains("*.cs", StringComparison.OrdinalIgnoreCase) || trimmed.Contains("*.{cs", StringComparison.OrdinalIgnoreCase);
+                inCSharpSection = trimmed.Contains("*.cs", StringComparison.OrdinalIgnoreCase) ||
+                                  trimmed.Contains("*.{cs", StringComparison.OrdinalIgnoreCase);
+
                 continue;
             }
 
-            if (inCSharpSection && trimmed.Contains('='))
-            {
-                count++;
-            }
+            if (inCSharpSection && trimmed.Contains('=')) { count++; }
         }
 
         return count;
@@ -874,19 +764,13 @@ internal sealed class AnalyzerService
             "MOD010" => "Use collection expressions for arrays and collection initializers.",
             "MOD011" => "Use raw string literals for multiline or heavily escaped text.",
             "MOD012" => "Use primary constructors for simple dependency-assignment constructors.",
-            _ => "Modernization rule"
+            _ => "Modernization rule",
         };
     }
 
-    private static string ToSeverityText(Severity severity)
-    {
-        return severity.ToString().ToLowerInvariant();
-    }
+    private static string ToSeverityText(Severity severity) => severity.ToString().ToLowerInvariant();
 
-    private static string NormalizePath(string path)
-    {
-        return path.Replace('\\', '/');
-    }
+    private static string NormalizePath(string path) => path.Replace('\\', '/');
 }
 
 internal sealed class JsonRpcException(int code, string message) : Exception(message)

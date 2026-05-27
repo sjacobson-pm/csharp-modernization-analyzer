@@ -1,4 +1,9 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Analyzer.Core.Detection;
 using Octokit;
 
@@ -7,21 +12,18 @@ namespace Analyzer.Action;
 internal sealed class GitHubReporter
 {
     private const string SummaryMarker = "<!-- modernization-analyzer-summary -->";
-    private readonly GitHubActionContext _context;
-    private readonly GitHubClient? _client;
-    private readonly int _maxSuggestions;
+    private readonly GitHubActionContext context;
+    private readonly GitHubClient? client;
+    private readonly int maxSuggestions;
 
     public GitHubReporter(GitHubActionContext context, int maxSuggestions)
     {
-        _context = context;
-        _maxSuggestions = maxSuggestions;
+        this.context = context;
+        this.maxSuggestions = maxSuggestions;
 
         if (context.CanPostToPullRequest)
         {
-            _client = new GitHubClient(new ProductHeaderValue("csharp-modernization-analyzer"))
-            {
-                Credentials = new Credentials(context.Token)
-            };
+            this.client = new GitHubClient(new ProductHeaderValue("csharp-modernization-analyzer")) { Credentials = new Credentials(context.Token) };
         }
     }
 
@@ -30,41 +32,44 @@ internal sealed class GitHubReporter
         IReadOnlyList<DetectionResult> allResults,
         CancellationToken cancellationToken = default)
     {
-        if (_client is null || !_context.PullRequestNumber.HasValue || string.IsNullOrWhiteSpace(_context.HeadSha))
+        if (this.client is null || !this.context.PullRequestNumber.HasValue || string.IsNullOrWhiteSpace(this.context.HeadSha))
         {
             Console.WriteLine("GitHub pull request context not available; skipping PR comments.");
+
             return 0;
         }
 
-        var posted = await CreateReviewAsync(inlineResults.Take(_maxSuggestions).ToList(), cancellationToken);
-        await UpsertSummaryCommentAsync(allResults, posted);
+        var posted = await this.CreateReviewAsync(inlineResults.Take(this.maxSuggestions).ToList(), cancellationToken);
+        await this.UpsertSummaryCommentAsync(allResults, posted);
+
         return posted;
     }
 
     private async Task<int> CreateReviewAsync(IReadOnlyList<DetectionResult> inlineResults, CancellationToken cancellationToken)
     {
-        if (_client is null || inlineResults.Count == 0)
-        {
-            return 0;
-        }
+        if (this.client is null || inlineResults.Count == 0) { return 0; }
 
         var payload = new
         {
             body = $"C# Modernization Analyzer posted {inlineResults.Count} inline suggestion(s).",
             @event = "COMMENT",
-            commit_id = _context.HeadSha,
-            comments = inlineResults.Select(BuildCommentPayload).ToArray()
+            commit_id = this.context.HeadSha,
+            comments = inlineResults.Select(BuildCommentPayload).ToArray(),
         };
 
         try
         {
-            var endpoint = new Uri($"https://api.github.com/repos/{_context.Owner}/{_context.Repo}/pulls/{_context.PullRequestNumber}/reviews");
-            await _client.Connection.Post(endpoint, payload, "application/vnd.github+json", cancellationToken);
+            var endpoint = new Uri(
+                $"https://api.github.com/repos/{this.context.Owner}/{this.context.Repo}/pulls/{this.context.PullRequestNumber}/reviews");
+
+            await this.client.Connection.Post(endpoint, payload, "application/vnd.github+json", cancellationToken);
+
             return inlineResults.Count;
         }
         catch (ApiException ex)
         {
             Console.WriteLine($"Unable to post inline review comments: {ex.Message}");
+
             return 0;
         }
     }
@@ -73,12 +78,10 @@ internal sealed class GitHubReporter
     {
         var startLine = result.LineSpan.Start.Line + 1;
         var endLine = Math.Max(result.LineSpan.End.Line + 1, startLine);
+
         var payload = new Dictionary<string, object?>
         {
-            ["path"] = result.FilePath.Replace('\\', '/'),
-            ["body"] = BuildSuggestionBody(result),
-            ["side"] = "RIGHT",
-            ["line"] = endLine
+            ["path"] = result.FilePath.Replace('\\', '/'), ["body"] = BuildSuggestionBody(result), ["side"] = "RIGHT", ["line"] = endLine,
         };
 
         if (endLine > startLine)
@@ -111,22 +114,20 @@ internal sealed class GitHubReporter
 
     private async Task UpsertSummaryCommentAsync(IReadOnlyList<DetectionResult> allResults, int postedCount)
     {
-        if (_client is null || !_context.PullRequestNumber.HasValue)
-        {
-            return;
-        }
+        if (this.client is null || !this.context.PullRequestNumber.HasValue) { return; }
 
-        var summaryBody = BuildSummaryBody(allResults, postedCount);
-        var comments = await _client.Issue.Comment.GetAllForIssue(_context.Owner!, _context.Repo!, _context.PullRequestNumber.Value);
+        var summaryBody = this.BuildSummaryBody(allResults, postedCount);
+        var comments = await this.client.Issue.Comment.GetAllForIssue(this.context.Owner!, this.context.Repo!, this.context.PullRequestNumber.Value);
         var existing = comments.FirstOrDefault(comment => comment.Body?.Contains(SummaryMarker, StringComparison.Ordinal) == true);
 
         if (existing is null)
         {
-            await _client.Issue.Comment.Create(_context.Owner!, _context.Repo!, _context.PullRequestNumber.Value, summaryBody);
+            await this.client.Issue.Comment.Create(this.context.Owner!, this.context.Repo!, this.context.PullRequestNumber.Value, summaryBody);
+
             return;
         }
 
-        await _client.Issue.Comment.Update(_context.Owner!, _context.Repo!, existing.Id, summaryBody);
+        await this.client.Issue.Comment.Update(this.context.Owner!, this.context.Repo!, existing.Id, summaryBody);
     }
 
     private string BuildSummaryBody(IReadOnlyList<DetectionResult> allResults, int postedCount)
@@ -134,11 +135,11 @@ internal sealed class GitHubReporter
         var suggestionCount = allResults.Count(result => result.Severity == Severity.Suggestion);
         var warningCount = allResults.Count(result => result.Severity == Severity.Warning);
         var errorCount = allResults.Count(result => result.Severity == Severity.Error);
-        var byRule = allResults
-            .GroupBy(result => new { result.RuleId, result.RuleName })
-            .OrderByDescending(group => group.Count())
-            .ThenBy(group => group.Key.RuleId, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+
+        var byRule = allResults.GroupBy(result => new { result.RuleId, result.RuleName })
+                               .OrderByDescending(group => group.Count())
+                               .ThenBy(group => group.Key.RuleId, StringComparer.OrdinalIgnoreCase)
+                               .ToList();
 
         var builder = new StringBuilder();
         builder.AppendLine(SummaryMarker);
@@ -151,10 +152,7 @@ internal sealed class GitHubReporter
         builder.AppendLine($"| Error | {errorCount} |");
         builder.AppendLine();
 
-        if (byRule.Count == 0)
-        {
-            builder.AppendLine("No modernization opportunities met the configured reporting threshold.");
-        }
+        if (byRule.Count == 0) { builder.AppendLine("No modernization opportunities met the configured reporting threshold."); }
         else
         {
             builder.AppendLine("| Rule | Finding | Severity | Count |");
@@ -168,7 +166,8 @@ internal sealed class GitHubReporter
         }
 
         builder.AppendLine();
-        builder.AppendLine($"Posted {postedCount} inline suggestion comment(s) (max {_maxSuggestions}).");
+        builder.AppendLine($"Posted {postedCount} inline suggestion comment(s) (max {this.maxSuggestions}).");
+
         return builder.ToString();
     }
 }

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Analyzer.Core.Configuration;
 
 namespace Analyzer.Core.Tests;
@@ -17,35 +18,35 @@ public class ModernizationConfigTests
     [Fact]
     public void LoadFromYaml_Parses_Valid_Config()
     {
-        var yaml = """
-            version: 1
+        const string Yaml = """
+                            version: 1
 
-            scan:
-              scope: full-repo
-              include:
-                - "src/**/*.cs"
-              exclude:
-                - "**/Migrations/**"
+                            scan:
+                              scope: full-repo
+                              include:
+                                - "src/**/*.cs"
+                              exclude:
+                                - "**/Migrations/**"
 
-            standards:
-              external:
-                - url: "https://example.com/standards"
+                            standards:
+                              external:
+                                - url: "https://example.com/standards"
 
-            rules:
-              MOD008:
-                enabled: true
-                severity: warning
-              MOD012:
-                enabled: false
+                            rules:
+                              MOD008:
+                                enabled: true
+                                severity: warning
+                              MOD012:
+                                enabled: false
 
-            ai:
-              enabled: false
-              provider: azure-openai
-              model: gpt-4
-              explain: false
-            """;
+                            ai:
+                              enabled: false
+                              provider: azure-openai
+                              model: gpt-4
+                              explain: false
+                            """;
 
-        var config = ModernizationConfig.LoadFromYaml(yaml);
+        var config = ModernizationConfig.LoadFromYaml(Yaml);
 
         Assert.Equal("full-repo", config.Scope);
         Assert.Contains("src/**/*.cs", config.IncludePatterns);
@@ -60,10 +61,7 @@ public class ModernizationConfigTests
     [Fact]
     public void IsExcluded_Matches_Migration_Files()
     {
-        var config = new ModernizationConfig
-        {
-            ExcludePatterns = ["**/Migrations/**"]
-        };
+        var config = new ModernizationConfig { ExcludePatterns = ["**/Migrations/**"] };
 
         Assert.True(config.IsExcluded("src/Data/Migrations/20240101_Initial.cs"));
         Assert.False(config.IsExcluded("src/Services/UserService.cs"));
@@ -81,13 +79,7 @@ public class ModernizationConfigTests
     [Fact]
     public void IsRuleEnabled_Respects_Override()
     {
-        var config = new ModernizationConfig
-        {
-            RuleOverrides = new Dictionary<string, RuleOverride>
-            {
-                ["MOD012"] = new RuleOverride { Enabled = false }
-            }
-        };
+        var config = new ModernizationConfig { RuleOverrides = new Dictionary<string, RuleOverride> { ["MOD012"] = new() { Enabled = false } }, };
 
         Assert.True(config.IsRuleEnabled("MOD001"));
         Assert.False(config.IsRuleEnabled("MOD012"));
@@ -106,10 +98,7 @@ public class ModernizationConfigTests
     {
         var config = new ModernizationConfig
         {
-            RuleOverrides = new Dictionary<string, RuleOverride>
-            {
-                ["MOD008"] = new RuleOverride { Enabled = true, SeverityOverride = "Warning" }
-            }
+            RuleOverrides = new Dictionary<string, RuleOverride> { ["MOD008"] = new() { Enabled = true, SeverityOverride = "Warning" }, },
         };
 
         Assert.Equal(Detection.Severity.Warning, config.GetRuleSeverity("MOD008"));

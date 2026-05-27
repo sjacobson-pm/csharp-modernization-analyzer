@@ -1,33 +1,31 @@
+using System;
+using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Analyzer.Mcp.Tools;
 
 internal sealed class ScanFilesTool(AnalyzerService analyzer) : IMcpTool
 {
     public string Name => "scan_files";
+
     public string Description => "Analyze specific files or directories for modernization opportunities.";
-    public JsonObject InputSchema => new()
-    {
-        ["type"] = "object",
-        ["properties"] = new JsonObject
+
+    public JsonObject InputSchema =>
+        new()
         {
-            ["paths"] = new JsonObject
+            ["type"] = "object",
+            ["properties"] = new JsonObject
             {
-                ["type"] = "array",
-                ["items"] = new JsonObject { ["type"] = "string" },
-                ["minItems"] = 1
+                ["paths"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" }, ["minItems"] = 1 },
+                ["config_path"] = new JsonObject { ["type"] = "string", ["default"] = ".modernization.yml" },
             },
-            ["config_path"] = new JsonObject
-            {
-                ["type"] = "string",
-                ["default"] = ".modernization.yml"
-            }
-        },
-        ["required"] = new JsonArray("paths"),
-        ["additionalProperties"] = false
-    };
+            ["required"] = new JsonArray("paths"),
+            ["additionalProperties"] = false,
+        };
 
     public async Task<object> ExecuteAsync(JsonElement arguments, CancellationToken cancellationToken)
     {
@@ -35,10 +33,7 @@ internal sealed class ScanFilesTool(AnalyzerService analyzer) : IMcpTool
             ? new ScanFilesArguments()
             : JsonSerializer.Deserialize<ScanFilesArguments>(arguments.GetRawText()) ?? new ScanFilesArguments();
 
-        if (request.Paths.Count == 0)
-        {
-            throw new InvalidOperationException("scan_files requires at least one path.");
-        }
+        if (request.Paths.Count == 0) { throw new InvalidOperationException("scan_files requires at least one path."); }
 
         return await analyzer.ScanFilesAsync(request.Paths, request.ConfigPath, cancellationToken);
     }

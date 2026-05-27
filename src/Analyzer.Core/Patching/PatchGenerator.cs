@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Linq;
 using Analyzer.Core.Detection;
 
 namespace Analyzer.Core.Patching;
@@ -19,42 +21,47 @@ public sealed class PatchGenerator
         sb.AppendLine($"+++ b/{result.FilePath}");
         sb.AppendLine($"@@ -{startLine},{originalLines.Length} +{startLine},{suggestedLines.Length} @@");
 
-        foreach (var line in originalLines)
-            sb.AppendLine($"-{line}");
+        foreach (var line in originalLines) { sb.AppendLine($"-{line}"); }
 
-        foreach (var line in suggestedLines)
-            sb.AppendLine($"+{line}");
+        foreach (var line in suggestedLines) { sb.AppendLine($"+{line}"); }
 
         return sb.ToString();
     }
 
     /// <summary>Generate a collection of patches from multiple detection results.</summary>
-    public IReadOnlyList<Patch> GeneratePatches(IReadOnlyList<DetectionResult> results)
-    {
-        return results.Select(result => new Patch
-        {
-            RuleId = result.RuleId,
-            FilePath = result.FilePath,
-            StartLine = result.LineSpan.Start.Line + 1,
-            EndLine = result.LineSpan.End.Line + 1,
-            OriginalCode = result.OriginalCode,
-            SuggestedCode = result.SuggestedCode,
-            UnifiedDiff = GenerateUnifiedDiff(result),
-            Description = result.Description,
-            Explanation = result.Explanation
-        }).ToList();
-    }
+    public IReadOnlyList<Patch> GeneratePatches(IReadOnlyList<DetectionResult> results) =>
+        results.Select(result => new Patch
+                {
+                    RuleId = result.RuleId,
+                    FilePath = result.FilePath,
+                    StartLine = result.LineSpan.Start.Line + 1,
+                    EndLine = result.LineSpan.End.Line + 1,
+                    OriginalCode = result.OriginalCode,
+                    SuggestedCode = result.SuggestedCode,
+                    UnifiedDiff = this.GenerateUnifiedDiff(result),
+                    Description = result.Description,
+                    Explanation = result.Explanation,
+                })
+               .ToList();
 }
 
 public sealed class Patch
 {
     public required string RuleId { get; init; }
+
     public required string FilePath { get; init; }
+
     public required int StartLine { get; init; }
+
     public required int EndLine { get; init; }
+
     public required string OriginalCode { get; init; }
+
     public required string SuggestedCode { get; init; }
+
     public required string UnifiedDiff { get; init; }
+
     public required string Description { get; init; }
+
     public string? Explanation { get; init; }
 }
