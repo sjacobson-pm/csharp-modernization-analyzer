@@ -73,3 +73,19 @@ jobs:
         run: |
           printf 'Content-Length: 58\r\n\r\n{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | \
             timeout 5 pm-modernize mcp-serve 2>/dev/null | head -c 500 | grep -q "protocolVersion"
+
+  modernization-review:
+    name: Modernization Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: build-and-test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: sjacobson-pm/csharp-modernization-analyzer@develop
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          scope: changed-files
+          ai-enabled: 'false'
+          severity-threshold: 'suggestion'
