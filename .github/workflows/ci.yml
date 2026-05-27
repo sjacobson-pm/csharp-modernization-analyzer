@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -41,3 +41,35 @@ jobs:
         with:
           name: coverage-report
           path: '**/coverage.cobertura.xml'
+
+  cli-smoke-test:
+    name: CLI Smoke Test
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install CLI tool
+        run: |
+          dotnet pack src/Analyzer.Cli/Analyzer.Cli.csproj -o ./nupkg
+          dotnet tool install --global --add-source ./nupkg CSharpModernizer.Cli
+
+      - name: Run scan
+        run: pm-modernize scan src --full
+
+      - name: Test SARIF output
+        run: pm-modernize scan src --full --output sarif > /dev/null
+
+      - name: Test rule filtering
+        run: pm-modernize scan src --full --rule MOD008 --exclude-rule MOD001
+
+      - name: Test MCP server handshake
+        run: |
+          printf 'Content-Length: 58\r\n\r\n{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | \
+            timeout 5 pm-modernize mcp-serve 2>/dev/null | head -c 500 | grep -q "protocolVersion"

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -17,47 +18,94 @@ public sealed class DetectionEngine(
 {
     /// <summary>
     /// Analyze a list of file paths and return all detected modernization opportunities.
+    /// Files are analyzed in parallel for performance on large repos.
     /// </summary>
     public async Task<IReadOnlyList<DetectionResult>> AnalyzeFilesAsync(
         IReadOnlyList<string> filePaths,
         CSharpCompilation compilation,
         CancellationToken cancellationToken = default)
     {
-        var results = new List<DetectionResult>();
         var langVersion = GetEffectiveLangVersion(compilation);
+        var eligibleDetectors = detectors
+            .Where(d => d.MinimumLangVersion <= langVersion && config.IsRuleEnabled(d.RuleId))
+            .ToList();
 
-        foreach (var filePath in filePaths)
+        if (eligibleDetectors.Count == 0)
         {
-            if (config.IsExcluded(filePath)) { continue; }
-
-            var tree = compilation.SyntaxTrees.FirstOrDefault(t => t.FilePath.Equals(filePath, StringComparison.OrdinalIgnoreCase));
-
-            if (tree is null) { continue; }
-
-            var semanticModel = compilation.GetSemanticModel(tree);
-
-            var context = new DetectionContext
-            {
-                SyntaxTree = tree,
-                SemanticModel = semanticModel,
-                Compilation = compilation,
-                TargetLangVersion = langVersion,
-                Standards = standards,
-                FilePath = filePath,
-            };
-
-            foreach (var detector in detectors)
-            {
-                if (detector.MinimumLangVersion > langVersion) { continue; }
-
-                if (!config.IsRuleEnabled(detector.RuleId)) { continue; }
-
-                var detections = await detector.DetectAsync(context, cancellationToken);
-                results.AddRange(detections);
-            }
+            return [];
         }
 
-        return results;
+        var eligibleFiles = filePaths
+            .Where(f => !config.IsExcluded(f))
+            .Select(f => new
+            {
+                Path = f,
+                Tree = compilation.SyntaxTrees.FirstOrDefault(t => t.FilePath.Equals(f, StringComparison.OrdinalIgnoreCase)),
+            })
+            .Where(x => x.Tree is not null)
+            .ToList();
+
+        // For small file sets, run sequentially to avoid overhead
+        if (eligibleFiles.Count <= 5)
+        {
+            var results = new List<DetectionResult>();
+
+            foreach (var file in eligibleFiles)
+            {
+                var context = new DetectionContext
+                {
+                    SyntaxTree = file.Tree!,
+                    SemanticModel = compilation.GetSemanticModel(file.Tree!),
+                    Compilation = compilation,
+                    TargetLangVersion = langVersion,
+                    Standards = standards,
+                    FilePath = file.Path,
+                };
+
+                foreach (var detector in eligibleDetectors)
+                {
+                    var detections = await detector.DetectAsync(context, cancellationToken);
+                    results.AddRange(detections);
+                }
+            }
+
+            return results;
+        }
+
+        // For larger file sets, process files in parallel
+        var bag = new ConcurrentBag<DetectionResult>();
+
+        await Parallel.ForEachAsync(
+            eligibleFiles,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = Environment.ProcessorCount,
+                CancellationToken = cancellationToken,
+            },
+            async (file, ct) =>
+            {
+                var context = new DetectionContext
+                {
+                    SyntaxTree = file.Tree!,
+                    SemanticModel = compilation.GetSemanticModel(file.Tree!),
+                    Compilation = compilation,
+                    TargetLangVersion = langVersion,
+                    Standards = standards,
+                    FilePath = file.Path,
+                };
+
+                foreach (var detector in eligibleDetectors)
+                {
+                    var detections = await detector.DetectAsync(context, ct);
+
+                    foreach (var detection in detections)
+                    {
+                        bag.Add(detection);
+                    }
+                }
+            });
+
+        return bag.ToList();
     }
 
     private static Version GetEffectiveLangVersion(CSharpCompilation compilation)

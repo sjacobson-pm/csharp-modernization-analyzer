@@ -43,6 +43,12 @@ jobs:
       - name: Push to NuGet (GitHub Packages)
         run: dotnet nuget push ./artifacts/*.nupkg --source "https://nuget.pkg.github.com/sjacobson-pm/index.json" --api-key ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Push to NuGet.org
+        if: env.NUGET_API_KEY != ''
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: dotnet nuget push ./artifacts/*.nupkg --source "https://api.nuget.org/v3/index.json" --api-key ${{ secrets.NUGET_API_KEY }} --skip-duplicate
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
