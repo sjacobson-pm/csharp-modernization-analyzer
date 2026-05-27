@@ -1,6 +1,10 @@
 ﻿using System.CommandLine;
+using System.Text.Json;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Analyzer.Core.Configuration;
 using Analyzer.Core.Detection;
+using Analyzer.Core.Detection.Detectors;
 using Analyzer.Core.Standards;
 using Analyzer.Core.Patching;
 using Analyzer.Core.AI;
@@ -136,21 +140,179 @@ public class Program
 
         // Run analysis
         Console.WriteLine("  Running analysis...");
-        Console.WriteLine("    (Roslyn compilation and detection engine)");
+        var detectors = CreateDetectors();
+        var engine = new DetectionEngine(detectors, standards, config);
+
+        // Parse files into a Roslyn compilation
+        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest);
+        var syntaxTrees = new List<SyntaxTree>();
+
+        foreach (var file in files)
+        {
+            try
+            {
+                var sourceText = File.ReadAllText(file);
+                var tree = CSharpSyntaxTree.ParseText(sourceText, parseOptions, path: file);
+                syntaxTrees.Add(tree);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    ⚠ Could not read: {Path.GetFileName(file)} ({ex.Message})");
+            }
+        }
+
+        // Create compilation with basic framework references
+        var references = GetFrameworkReferences();
+        var compilation = CSharpCompilation.Create(
+            "TargetAnalysis",
+            syntaxTrees: syntaxTrees,
+            references: references,
+            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        Console.WriteLine($"    Parsed {syntaxTrees.Count} file(s) into compilation");
+        Console.WriteLine($"    Running {detectors.Count} detectors...");
         Console.WriteLine();
 
-        // TODO: Wire up actual Roslyn compilation and DetectionEngine
-        // For now, show what the output format will look like
+        var results = await engine.AnalyzeFilesAsync(
+            files.ToList(),
+            compilation);
+
+        // Filter by severity
+        var minSeverity = severity.ToLowerInvariant() switch
+        {
+            "warning" => Severity.Warning,
+            "error" => Severity.Error,
+            _ => Severity.Suggestion
+        };
+        var filteredResults = results.Where(r => r.Severity >= minSeverity).ToList();
+
+        // Output results
         Console.WriteLine("  ─── Results ───────────────────────────────────");
         Console.WriteLine();
-        Console.WriteLine("  No modernization opportunities detected.");
-        Console.WriteLine("  (Detection engine integration pending)");
+
+        if (filteredResults.Count == 0)
+        {
+            Console.WriteLine("  No modernization opportunities detected.");
+        }
+        else
+        {
+            if (output == "json")
+            {
+                OutputJson(filteredResults);
+            }
+            else
+            {
+                OutputConsole(filteredResults);
+            }
+        }
+
         Console.WriteLine();
         Console.WriteLine("  ─── Summary ───────────────────────────────────");
-        Console.WriteLine($"  Files scanned: {files.Count}");
-        Console.WriteLine("  Suggestions:   0");
-        Console.WriteLine("  Warnings:      0");
+        Console.WriteLine($"  Files scanned:  {files.Count}");
+        Console.WriteLine($"  Suggestions:    {filteredResults.Count(r => r.Severity == Severity.Suggestion)}");
+        Console.WriteLine($"  Warnings:       {filteredResults.Count(r => r.Severity == Severity.Warning)}");
+        Console.WriteLine($"  Total findings: {filteredResults.Count}");
         Console.WriteLine();
+    }
+
+    private static List<IPatternDetector> CreateDetectors()
+    {
+        return new List<IPatternDetector>
+        {
+            new VarUsageDetector(),
+            new NullConditionalDetector(),
+            new StringInterpolationDetector(),
+            new PatternMatchingDetector(),
+            new SwitchExpressionDetector(),
+            new UsingDeclarationDetector(),
+            new NullCoalescingAssignmentDetector(),
+            new FileScopedNamespaceDetector(),
+            new TargetTypedNewDetector(),
+            new CollectionExpressionDetector(),
+            new RawStringLiteralDetector(),
+            new PrimaryConstructorDetector()
+        };
+    }
+
+    private static List<MetadataReference> GetFrameworkReferences()
+    {
+        var references = new List<MetadataReference>();
+
+        // Get the runtime directory to find framework assemblies
+        var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
+        var essentialAssemblies = new[]
+        {
+            "System.Runtime.dll",
+            "System.Collections.dll",
+            "System.Linq.dll",
+            "System.Console.dll",
+            "System.Private.CoreLib.dll",
+            "System.Runtime.Extensions.dll",
+            "netstandard.dll",
+            "System.dll",
+            "System.Core.dll",
+            "System.Threading.Tasks.dll",
+            "System.IO.dll",
+            "System.Net.Http.dll",
+            "System.ComponentModel.dll",
+            "System.ObjectModel.dll",
+            "Microsoft.CSharp.dll"
+        };
+
+        foreach (var asm in essentialAssemblies)
+        {
+            var path = Path.Combine(runtimeDir, asm);
+            if (File.Exists(path))
+                references.Add(MetadataReference.CreateFromFile(path));
+        }
+
+        return references;
+    }
+
+    private static void OutputConsole(List<DetectionResult> results)
+    {
+        var grouped = results.GroupBy(r => r.FilePath).ToList();
+
+        foreach (var fileGroup in grouped)
+        {
+            var relativePath = Path.GetRelativePath(Directory.GetCurrentDirectory(), fileGroup.Key);
+            Console.WriteLine($"  📄 {relativePath}");
+
+            foreach (var result in fileGroup.OrderBy(r => r.LineSpan.Start.Line))
+            {
+                var line = result.LineSpan.Start.Line + 1;
+                var severityIcon = result.Severity switch
+                {
+                    Severity.Warning => "⚠",
+                    Severity.Error => "✗",
+                    _ => "💡"
+                };
+
+                Console.WriteLine($"     {severityIcon} Line {line}: [{result.RuleId}] {result.Description}");
+                Console.WriteLine($"       - {result.OriginalCode.Split('\n')[0].Trim()}");
+                Console.WriteLine($"       + {result.SuggestedCode.Split('\n')[0].Trim()}");
+                Console.WriteLine();
+            }
+        }
+    }
+
+    private static void OutputJson(List<DetectionResult> results)
+    {
+        var jsonResults = results.Select(r => new
+        {
+            ruleId = r.RuleId,
+            ruleName = r.RuleName,
+            description = r.Description,
+            filePath = r.FilePath,
+            line = r.LineSpan.Start.Line + 1,
+            column = r.LineSpan.Start.Character + 1,
+            severity = r.Severity.ToString().ToLowerInvariant(),
+            originalCode = r.OriginalCode,
+            suggestedCode = r.SuggestedCode
+        });
+
+        var json = JsonSerializer.Serialize(jsonResults, new JsonSerializerOptions { WriteIndented = true });
+        Console.WriteLine(json);
     }
 
     private static async Task GenerateConfigTemplateAsync()
