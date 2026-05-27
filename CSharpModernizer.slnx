@@ -17,9 +17,18 @@
   <Folder Name="/docs/" />
   <Folder Name="/docs/rules/">
     <File Path="docs/rules/MOD001.md" />
+    <File Path="docs/rules/MOD002.md" />
+    <File Path="docs/rules/MOD003.md" />
     <File Path="docs/rules/MOD004.md" />
+    <File Path="docs/rules/MOD005.md" />
+    <File Path="docs/rules/MOD006.md" />
+    <File Path="docs/rules/MOD007.md" />
     <File Path="docs/rules/MOD008.md" />
+    <File Path="docs/rules/MOD009.md" />
+    <File Path="docs/rules/MOD010.md" />
+    <File Path="docs/rules/MOD011.md" />
     <File Path="docs/rules/MOD012.md" />
+    <File Path="docs/rules/MOD013.md" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Analyzer.Action/Analyzer.Action.csproj" />
