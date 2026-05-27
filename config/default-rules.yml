@@ -123,3 +123,12 @@ rules:
     min_lang_version: "12.0"
     default_severity: suggestion
     respects_editorconfig: false
+
+  MOD013:
+    id: MOD013
+    name: explicit-lambda-return-type
+    category: lambdas
+    description: "Use explicit lambda return type instead of cast expression in lambda body"
+    min_lang_version: "10.0"
+    default_severity: suggestion
+    respects_editorconfig: false

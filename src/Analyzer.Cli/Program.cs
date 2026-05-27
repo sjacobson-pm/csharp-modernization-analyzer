@@ -6,8 +6,6 @@ using Analyzer.Core.Configuration;
 using Analyzer.Core.Detection;
 using Analyzer.Core.Detection.Detectors;
 using Analyzer.Core.Standards;
-using Analyzer.Core.Patching;
-using Analyzer.Core.AI;
 
 namespace Analyzer.Cli;
 
@@ -44,13 +42,20 @@ public class Program
             diffOption,
             outputOption,
             configOption,
-            severityOption
+            severityOption,
         };
 
-        command.SetHandler(async (path, full, diff, output, configPath, severity) =>
-        {
-            await ExecuteScanAsync(path, full, diff, output, configPath, severity);
-        }, pathArgument, fullOption, diffOption, outputOption, configOption, severityOption);
+        command.SetHandler(
+            async (path, full, diff, output, configPath, severity) =>
+            {
+                await ExecuteScanAsync(path, full, diff, output, configPath, severity);
+            },
+            pathArgument,
+            fullOption,
+            diffOption,
+            outputOption,
+            configOption,
+            severityOption);
 
         return command;
     }
@@ -58,6 +63,7 @@ public class Program
     private static Command BuildConfigCommand()
     {
         var initCommand = new Command("init", "Generate a .modernization.yml template");
+
         initCommand.SetHandler(async () =>
         {
             await GenerateConfigTemplateAsync();
@@ -66,15 +72,18 @@ public class Program
         var validateCommand = new Command("validate", "Validate current configuration");
         var configPathOption = new Option<string>("--path", () => ".modernization.yml", "Path to configuration file");
         validateCommand.AddOption(configPathOption);
-        validateCommand.SetHandler(async (path) =>
-        {
-            await ValidateConfigAsync(path);
-        }, configPathOption);
+
+        validateCommand.SetHandler(
+            async (path) =>
+            {
+                await ValidateConfigAsync(path);
+            },
+            configPathOption);
 
         var command = new Command("config", "Configuration management")
         {
             initCommand,
-            validateCommand
+            validateCommand,
         };
 
         return command;
@@ -88,16 +97,20 @@ public class Program
         var command = new Command("mcp-serve", "Start MCP server for AI agent integration")
         {
             transportOption,
-            portOption
+            portOption,
         };
 
-        command.SetHandler(async (transport, port) =>
-        {
-            Console.WriteLine($"Starting MCP server ({transport} transport)...");
-            Console.WriteLine("MCP server implementation pending - see Analyzer.Mcp project");
-            // TODO: Wire up to Analyzer.Mcp server
-            await Task.CompletedTask;
-        }, transportOption, portOption);
+        command.SetHandler(
+            async (transport, port) =>
+            {
+                Console.WriteLine($"Starting MCP server ({transport} transport)...");
+                Console.WriteLine("MCP server implementation pending - see Analyzer.Mcp project");
+
+                // TODO: Wire up to Analyzer.Mcp server
+                await Task.CompletedTask;
+            },
+            transportOption,
+            portOption);
 
         return command;
     }
@@ -105,7 +118,7 @@ public class Program
     private static async Task ExecuteScanAsync(string path, bool full, bool diff, string output, string configPath, string severity)
     {
         Console.WriteLine("╔══════════════════════════════════════════════╗");
-        Console.WriteLine("║   C# Modernization Analyzer                 ║");
+        Console.WriteLine("║   C# Modernization Analyzer                  ║");
         Console.WriteLine("╚══════════════════════════════════════════════╝");
         Console.WriteLine();
 
@@ -135,6 +148,7 @@ public class Program
         if (files.Count == 0)
         {
             Console.WriteLine("  No files to analyze. Done.");
+
             return;
         }
 
@@ -151,7 +165,7 @@ public class Program
         {
             try
             {
-                var sourceText = File.ReadAllText(file);
+                var sourceText = await File.ReadAllTextAsync(file);
                 var tree = CSharpSyntaxTree.ParseText(sourceText, parseOptions, path: file);
                 syntaxTrees.Add(tree);
             }
@@ -163,6 +177,7 @@ public class Program
 
         // Create compilation with basic framework references
         var references = GetFrameworkReferences();
+
         var compilation = CSharpCompilation.Create(
             "TargetAnalysis",
             syntaxTrees: syntaxTrees,
@@ -182,8 +197,9 @@ public class Program
         {
             "warning" => Severity.Warning,
             "error" => Severity.Error,
-            _ => Severity.Suggestion
+            _ => Severity.Suggestion,
         };
+
         var filteredResults = results.Where(r => r.Severity >= minSeverity).ToList();
 
         // Output results
@@ -215,24 +231,22 @@ public class Program
         Console.WriteLine();
     }
 
-    private static List<IPatternDetector> CreateDetectors()
-    {
-        return new List<IPatternDetector>
-        {
-            new VarUsageDetector(),
-            new NullConditionalDetector(),
-            new StringInterpolationDetector(),
-            new PatternMatchingDetector(),
-            new SwitchExpressionDetector(),
-            new UsingDeclarationDetector(),
-            new NullCoalescingAssignmentDetector(),
-            new FileScopedNamespaceDetector(),
-            new TargetTypedNewDetector(),
-            new CollectionExpressionDetector(),
-            new RawStringLiteralDetector(),
-            new PrimaryConstructorDetector()
-        };
-    }
+    private static List<IPatternDetector> CreateDetectors() =>
+    [
+        new VarUsageDetector(),
+        new NullConditionalDetector(),
+        new StringInterpolationDetector(),
+        new PatternMatchingDetector(),
+        new SwitchExpressionDetector(),
+        new UsingDeclarationDetector(),
+        new NullCoalescingAssignmentDetector(),
+        new FileScopedNamespaceDetector(),
+        new TargetTypedNewDetector(),
+        new CollectionExpressionDetector(),
+        new RawStringLiteralDetector(),
+        new PrimaryConstructorDetector(),
+        new ExplicitLambdaReturnTypeDetector(),
+    ];
 
     private static List<MetadataReference> GetFrameworkReferences()
     {
@@ -240,6 +254,7 @@ public class Program
 
         // Get the runtime directory to find framework assemblies
         var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
+
         var essentialAssemblies = new[]
         {
             "System.Runtime.dll",
@@ -256,14 +271,17 @@ public class Program
             "System.Net.Http.dll",
             "System.ComponentModel.dll",
             "System.ObjectModel.dll",
-            "Microsoft.CSharp.dll"
+            "Microsoft.CSharp.dll",
         };
 
         foreach (var asm in essentialAssemblies)
         {
             var path = Path.Combine(runtimeDir, asm);
+
             if (File.Exists(path))
+            {
                 references.Add(MetadataReference.CreateFromFile(path));
+            }
         }
 
         return references;
@@ -281,11 +299,12 @@ public class Program
             foreach (var result in fileGroup.OrderBy(r => r.LineSpan.Start.Line))
             {
                 var line = result.LineSpan.Start.Line + 1;
+
                 var severityIcon = result.Severity switch
                 {
                     Severity.Warning => "⚠",
                     Severity.Error => "✗",
-                    _ => "💡"
+                    _ => "💡",
                 };
 
                 Console.WriteLine($"     {severityIcon} Line {line}: [{result.RuleId}] {result.Description}");
@@ -308,7 +327,7 @@ public class Program
             column = r.LineSpan.Start.Character + 1,
             severity = r.Severity.ToString().ToLowerInvariant(),
             originalCode = r.OriginalCode,
-            suggestedCode = r.SuggestedCode
+            suggestedCode = r.SuggestedCode,
         });
 
         var json = JsonSerializer.Serialize(jsonResults, new JsonSerializerOptions { WriteIndented = true });
@@ -358,6 +377,7 @@ public class Program
         {
             Console.WriteLine($"  ⚠ File already exists: {outputPath}");
             Console.WriteLine("  Use --force to overwrite (not yet implemented).");
+
             return;
         }
 
@@ -373,6 +393,7 @@ public class Program
         if (!File.Exists(path))
         {
             Console.WriteLine("  ✗ File not found. Run 'pm-modernize config init' to create one.");
+
             return;
         }
 
@@ -398,13 +419,19 @@ public class Program
     private static string FindRepoRoot(string startPath)
     {
         var dir = Path.GetFullPath(startPath);
+
         if (File.Exists(dir))
+        {
             dir = Path.GetDirectoryName(dir)!;
+        }
 
         while (dir is not null)
         {
             if (Directory.Exists(Path.Combine(dir, ".git")))
+            {
                 return dir;
+            }
+
             dir = Path.GetDirectoryName(dir);
         }
 
