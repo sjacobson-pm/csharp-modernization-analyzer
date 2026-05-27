@@ -60,6 +60,18 @@ public class Program
             Description = "Minimum severity to report: suggestion, warning, error", DefaultValueFactory = _ => "suggestion",
         };
 
+        var ruleOption = new Option<string[]>("--rule")
+        {
+            Description = "Only run specific rule(s) by ID (e.g., --rule MOD008 --rule MOD013)",
+            Arity = ArgumentArity.ZeroOrMore,
+        };
+
+        var excludeRuleOption = new Option<string[]>("--exclude-rule")
+        {
+            Description = "Exclude specific rule(s) by ID (e.g., --exclude-rule MOD001)",
+            Arity = ArgumentArity.ZeroOrMore,
+        };
+
         var command = new Command("scan", "Scan files for modernization opportunities")
         {
             pathArgument,
@@ -68,6 +80,8 @@ public class Program
             outputOption,
             configOption,
             severityOption,
+            ruleOption,
+            excludeRuleOption,
         };
 
         command.SetAction(async (parseResult, _) =>
@@ -78,8 +92,10 @@ public class Program
             var output = parseResult.GetValue(outputOption) ?? "console";
             var configPath = parseResult.GetValue(configOption) ?? ".modernization.yml";
             var severity = parseResult.GetValue(severityOption) ?? "suggestion";
+            var includeRules = parseResult.GetValue(ruleOption);
+            var excludeRules = parseResult.GetValue(excludeRuleOption);
 
-            await ExecuteScanAsync(path, full, diff, output, configPath, severity);
+            await ExecuteScanAsync(path, full, diff, output, configPath, severity, includeRules, excludeRules);
         });
 
         return command;
@@ -136,7 +152,7 @@ public class Program
         return command;
     }
 
-    private static async Task ExecuteScanAsync(string path, bool full, bool diff, string output, string configPath, string severity)
+    private static async Task ExecuteScanAsync(string path, bool full, bool diff, string output, string configPath, string severity, string[]? includeRules, string[]? excludeRules)
     {
         Console.WriteLine("╔══════════════════════════════════════════════╗");
         Console.WriteLine("║   C# Modernization Analyzer                  ║");
@@ -175,8 +191,25 @@ public class Program
 
         // Run analysis
         Console.WriteLine("  Running analysis...");
-        var detectors = CreateDetectors();
-        var engine = new DetectionEngine(detectors, standards, config);
+        var allDetectors = CreateDetectors();
+
+        // Apply --rule / --exclude-rule filters
+        var detectors = allDetectors.AsEnumerable();
+
+        if (includeRules is { Length: > 0 })
+        {
+            var includeSet = new HashSet<string>(includeRules, StringComparer.OrdinalIgnoreCase);
+            detectors = detectors.Where(d => includeSet.Contains(d.RuleId));
+        }
+
+        if (excludeRules is { Length: > 0 })
+        {
+            var excludeSet = new HashSet<string>(excludeRules, StringComparer.OrdinalIgnoreCase);
+            detectors = detectors.Where(d => !excludeSet.Contains(d.RuleId));
+        }
+
+        var activeDetectors = detectors.ToList();
+        var engine = new DetectionEngine(activeDetectors, standards, config);
 
         // Parse files into a Roslyn compilation
         var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest);
@@ -203,7 +236,7 @@ public class Program
             options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         Console.WriteLine($"    Parsed {syntaxTrees.Count} file(s) into compilation");
-        Console.WriteLine($"    Running {detectors.Count} detectors...");
+        Console.WriteLine($"    Running {activeDetectors.Count} detectors...");
         Console.WriteLine();
 
         var results = await engine.AnalyzeFilesAsync(files.ToList(), compilation);
@@ -225,8 +258,18 @@ public class Program
         if (filteredResults.Count == 0) { Console.WriteLine("  No modernization opportunities detected."); }
         else
         {
-            if (output == "json") { OutputJson(filteredResults); }
-            else { OutputConsole(filteredResults); }
+            switch (output.ToLowerInvariant())
+            {
+                case "json":
+                    OutputJson(filteredResults);
+                    break;
+                case "sarif":
+                    OutputSarif(filteredResults, path);
+                    break;
+                default:
+                    OutputConsole(filteredResults);
+                    break;
+            }
         }
 
         Console.WriteLine();
@@ -323,6 +366,113 @@ public class Program
         var json = JsonSerializer.Serialize(jsonResults, new JsonSerializerOptions { WriteIndented = true });
         Console.WriteLine(json);
     }
+
+    private static void OutputSarif(List<DetectionResult> results, string scanPath)
+    {
+        var repoRoot = FindRepoRoot(scanPath);
+
+        var rules = results
+            .GroupBy(r => r.RuleId)
+            .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(g =>
+            {
+                var first = g.First();
+                return new
+                {
+                    id = first.RuleId,
+                    name = first.RuleName,
+                    shortDescription = new { text = first.RuleName },
+                    fullDescription = new { text = first.Description },
+                    defaultConfiguration = new { level = ToSarifLevel(first.Severity) },
+                };
+            })
+            .ToArray();
+
+        var sarifResults = results
+            .OrderBy(r => r.FilePath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.LineSpan.Start.Line)
+            .Select(r =>
+            {
+                var relativePath = Path.GetRelativePath(repoRoot, r.FilePath).Replace('\\', '/');
+                return new
+                {
+                    ruleId = r.RuleId,
+                    level = ToSarifLevel(r.Severity),
+                    message = new { text = r.Description },
+                    locations = new object[]
+                    {
+                        new
+                        {
+                            physicalLocation = new
+                            {
+                                artifactLocation = new { uri = relativePath },
+                                region = new
+                                {
+                                    startLine = r.LineSpan.Start.Line + 1,
+                                    startColumn = r.LineSpan.Start.Character + 1,
+                                    endLine = Math.Max(r.LineSpan.End.Line + 1, r.LineSpan.Start.Line + 1),
+                                    endColumn = Math.Max(r.LineSpan.End.Character + 1, r.LineSpan.Start.Character + 1),
+                                },
+                            },
+                        },
+                    },
+                    fixes = new object[]
+                    {
+                        new
+                        {
+                            description = new { text = "Apply suggested modernization" },
+                            artifactChanges = new object[]
+                            {
+                                new
+                                {
+                                    artifactLocation = new { uri = relativePath },
+                                    replacements = new object[]
+                                    {
+                                        new
+                                        {
+                                            deletedRegion = new
+                                            {
+                                                startLine = r.LineSpan.Start.Line + 1,
+                                                startColumn = r.LineSpan.Start.Character + 1,
+                                                endLine = Math.Max(r.LineSpan.End.Line + 1, r.LineSpan.Start.Line + 1),
+                                                endColumn = Math.Max(r.LineSpan.End.Character + 1, r.LineSpan.Start.Character + 1),
+                                            },
+                                            insertedContent = new { text = r.SuggestedCode },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                };
+            })
+            .ToArray();
+
+        var sarif = new
+        {
+            schema = "https://json.schemastore.org/sarif-2.1.0.json",
+            version = "2.1.0",
+            runs = new object[]
+            {
+                new
+                {
+                    tool = new { driver = new { name = "C# Modernization Analyzer", semanticVersion = "1.0.0", rules } },
+                    results = sarifResults,
+                },
+            },
+        };
+
+        var json = JsonSerializer.Serialize(sarif, new JsonSerializerOptions { WriteIndented = true });
+        Console.WriteLine(json);
+    }
+
+    private static string ToSarifLevel(Severity severity) =>
+        severity switch
+        {
+            Severity.Error => "error",
+            Severity.Warning => "warning",
+            _ => "note",
+        };
 
     private static async Task GenerateConfigTemplateAsync()
     {
