@@ -12,7 +12,8 @@ namespace Analyzer.Core.Standards;
 /// </summary>
 public sealed class StandardsResolver(HttpClient? httpClient = null)
 {
-    private readonly HttpClient httpClient = httpClient ?? new HttpClient();
+    private static readonly HttpClient SharedHttpClient = new();
+    private readonly HttpClient httpClient = httpClient ?? SharedHttpClient;
 
     /// <summary>
     /// Resolve all standards for the given repository root path.
@@ -75,14 +76,52 @@ public sealed class StandardsResolver(HttpClient? httpClient = null)
 
         var content = File.ReadAllText(path);
 
-        var settings = new StyleCopSettings
+        try
         {
-            DocumentPrivateElements = content.Contains("\"documentPrivateElements\": true"),
-            SystemUsingDirectivesFirst = content.Contains("\"systemUsingDirectivesFirst\": true"),
-            UsingDirectivesPlacement = content.Contains("\"outsideNamespace\"") ? "outsideNamespace" : "insideNamespace",
-        };
+            using var doc = System.Text.Json.JsonDocument.Parse(content, new System.Text.Json.JsonDocumentOptions
+            {
+                CommentHandling = System.Text.Json.JsonCommentHandling.Skip,
+                AllowTrailingCommas = true,
+            });
 
-        return Task.FromResult<StyleCopSettings?>(settings);
+            var root = doc.RootElement;
+            var documentPrivate = false;
+            var sysUsingFirst = false;
+            var usingPlacement = "outsideNamespace";
+
+            if (root.TryGetProperty("settings", out var settingsElement))
+            {
+                if (settingsElement.TryGetProperty("documentationRules", out var docRules) &&
+                    docRules.TryGetProperty("documentPrivateElements", out var docPrivateEl))
+                {
+                    documentPrivate = docPrivateEl.GetBoolean();
+                }
+
+                if (settingsElement.TryGetProperty("orderingRules", out var orderRules))
+                {
+                    if (orderRules.TryGetProperty("systemUsingDirectivesFirst", out var sysFirstEl))
+                    {
+                        sysUsingFirst = sysFirstEl.GetBoolean();
+                    }
+
+                    if (orderRules.TryGetProperty("usingDirectivesPlacement", out var placementEl))
+                    {
+                        usingPlacement = placementEl.GetString() ?? "outsideNamespace";
+                    }
+                }
+            }
+
+            return Task.FromResult<StyleCopSettings?>(new StyleCopSettings
+            {
+                DocumentPrivateElements = documentPrivate,
+                SystemUsingDirectivesFirst = sysUsingFirst,
+                UsingDirectivesPlacement = usingPlacement,
+            });
+        }
+        catch
+        {
+            return Task.FromResult<StyleCopSettings?>(null);
+        }
     }
 
     private static Task<Dictionary<string, string>> ParseRuleSetsAsync()

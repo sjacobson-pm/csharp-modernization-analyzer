@@ -12,14 +12,19 @@ namespace Analyzer.Core.AI;
 /// </summary>
 public sealed class OpenAiProvider : IAiProvider
 {
+    private static readonly HttpClient SharedHttpClient = new();
     private readonly HttpClient httpClient;
     private readonly string model;
 
     public OpenAiProvider(string apiKey, string model = "gpt-4o", HttpClient? httpClient = null)
     {
         this.model = model;
-        this.httpClient = httpClient ?? new HttpClient();
-        this.httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
+        this.httpClient = httpClient ?? SharedHttpClient;
+
+        if (!this.httpClient.DefaultRequestHeaders.Contains("Authorization"))
+        {
+            this.httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
+        }
     }
 
     public async Task<string> GenerateExplanationAsync(DetectionResult result, CancellationToken cancellationToken = default)

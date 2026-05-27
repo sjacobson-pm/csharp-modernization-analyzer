@@ -4,7 +4,7 @@ Hybrid Roslyn + AI analyzer that identifies outdated C# language constructs and 
 
 ## Features
 
-- **12 modernization rules** covering typing, null handling, pattern matching, string interpolation, switch expressions, namespaces, and more
+- **13 modernization rules** covering typing, null handling, pattern matching, string interpolation, switch expressions, lambdas, namespaces, and more
 - **LangVersion-aware** — only suggests patterns your project can actually use
 - **Standards-first** — reads `.editorconfig`, `stylecop.json`, and external standards before producing suggestions
 - **AI-enhanced** — optional OpenAI integration for explanations and refined diffs
@@ -14,10 +14,10 @@ Hybrid Roslyn + AI analyzer that identifies outdated C# language constructs and 
 
 | Surface | Use Case | Status |
 |---------|----------|--------|
-| CLI (`pm-modernize`) | Local development scanning | 🚧 In Progress |
-| GitHub Action | PR-time automated review | 🚧 In Progress |
-| MCP Server | AI agent tool integration | 📋 Planned |
-| Copilot Extension | `@modernize` in Copilot Chat | 📋 Planned |
+| CLI (`pm-modernize`) | Local development scanning | ✅ Working |
+| GitHub Action | PR-time automated review | ✅ Working |
+| MCP Server | AI agent tool integration (VS Code, Visual Studio) | ✅ Working |
+| Copilot Extension | `@modernize` in Copilot Chat | 🚧 In Progress |
 
 ## Quick Start
 
@@ -137,6 +137,7 @@ ai:
 | MOD010 | Collections | Use collection expressions `[...]` | 12.0 |
 | MOD011 | Strings | Use raw string literals | 11.0 |
 | MOD012 | Constructors | Use primary constructors | 12.0 |
+| MOD013 | Lambdas | Use explicit lambda return type instead of cast | 10.0 |
 
 ## Architecture
 

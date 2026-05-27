@@ -11,7 +11,6 @@ using System.Threading.Tasks;
 using Analyzer.Core.AI;
 using Analyzer.Core.Configuration;
 using Analyzer.Core.Detection;
-using Analyzer.Core.Detection.Detectors;
 using Analyzer.Core.Standards;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -59,20 +58,7 @@ public static class Program
             var compilation = BuildCompilation(repoRoot, targetFiles);
 
             var detectionEngine = new DetectionEngine(
-                [
-                    new VarUsageDetector(),
-                    new NullConditionalDetector(),
-                    new StringInterpolationDetector(),
-                    new PatternMatchingDetector(),
-                    new SwitchExpressionDetector(),
-                    new UsingDeclarationDetector(),
-                    new NullCoalescingAssignmentDetector(),
-                    new FileScopedNamespaceDetector(),
-                    new TargetTypedNewDetector(),
-                    new CollectionExpressionDetector(),
-                    new RawStringLiteralDetector(),
-                    new PrimaryConstructorDetector(),
-                ],
+                DetectorRegistry.CreateAll(),
                 standards,
                 config);
 

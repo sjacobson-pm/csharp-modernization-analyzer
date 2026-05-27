@@ -7,7 +7,6 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Analyzer.Core.Configuration;
 using Analyzer.Core.Detection;
-using Analyzer.Core.Detection.Detectors;
 using Analyzer.Core.Standards;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -120,15 +119,18 @@ public class Program
 
         var command = new Command("mcp-serve", "Start MCP server for AI agent integration") { transportOption, portOption };
 
-        command.SetAction(async (parseResult, _) =>
+        command.SetAction(async (parseResult, cancellationToken) =>
         {
-            var transport = parseResult.GetValue(transportOption);
+            var transport = parseResult.GetValue(transportOption) ?? "stdio";
+            var port = parseResult.GetValue(portOption);
 
-            Console.WriteLine($"Starting MCP server ({transport} transport)...");
-            Console.WriteLine("MCP server implementation pending - see Analyzer.Mcp project");
+            if (transport != "stdio")
+            {
+                Console.Error.WriteLine($"Starting MCP server on {transport} transport (port {port})...");
+            }
 
-            // TODO: Wire up to Analyzer.Mcp server
-            await Task.CompletedTask;
+            var server = new Analyzer.Mcp.McpServer();
+            await server.RunAsync(transport, port, cancellationToken);
         });
 
         return command;
@@ -237,21 +239,7 @@ public class Program
     }
 
     private static List<IPatternDetector> CreateDetectors() =>
-    [
-        new VarUsageDetector(),
-        new NullConditionalDetector(),
-        new StringInterpolationDetector(),
-        new PatternMatchingDetector(),
-        new SwitchExpressionDetector(),
-        new UsingDeclarationDetector(),
-        new NullCoalescingAssignmentDetector(),
-        new FileScopedNamespaceDetector(),
-        new TargetTypedNewDetector(),
-        new CollectionExpressionDetector(),
-        new RawStringLiteralDetector(),
-        new PrimaryConstructorDetector(),
-        new ExplicitLambdaReturnTypeDetector(),
-    ];
+        DetectorRegistry.CreateAll().ToList();
 
     private static List<MetadataReference> GetFrameworkReferences()
     {

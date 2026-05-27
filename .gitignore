@@ -41,4 +41,5 @@ Thumbs.db
 
 ## Tool output
 *.sarif
-/publish/mcp
+publish/
+nupkg/

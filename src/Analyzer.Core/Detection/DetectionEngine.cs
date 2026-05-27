@@ -80,7 +80,10 @@ public sealed class DetectionEngine(
             LanguageVersion.CSharp9 => new Version(9, 0),
             LanguageVersion.CSharp10 => new Version(10, 0),
             LanguageVersion.CSharp11 => new Version(11, 0),
-            _ => new Version(12, 0),
+            LanguageVersion.CSharp12 => new Version(12, 0),
+            LanguageVersion.CSharp13 => new Version(13, 0),
+            // For Preview or future versions, use highest so all detectors run
+            _ => new Version(99, 0),
         };
     }
 }

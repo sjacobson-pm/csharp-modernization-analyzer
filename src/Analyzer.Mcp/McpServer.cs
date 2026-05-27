@@ -361,21 +361,7 @@ internal interface IMcpTool
 
 internal sealed class AnalyzerService
 {
-    private static readonly IReadOnlyList<IPatternDetector> Detectors =
-    [
-        new VarUsageDetector(),
-        new NullConditionalDetector(),
-        new StringInterpolationDetector(),
-        new PatternMatchingDetector(),
-        new SwitchExpressionDetector(),
-        new UsingDeclarationDetector(),
-        new NullCoalescingAssignmentDetector(),
-        new FileScopedNamespaceDetector(),
-        new TargetTypedNewDetector(),
-        new CollectionExpressionDetector(),
-        new RawStringLiteralDetector(),
-        new PrimaryConstructorDetector(),
-    ];
+    private static readonly IReadOnlyList<IPatternDetector> Detectors = DetectorRegistry.CreateAll();
 
     private static readonly Lazy<IReadOnlyList<MetadataReference>> MetadataReferences = new(CreateMetadataReferences);
     private readonly PatchGenerator patchGenerator = new();

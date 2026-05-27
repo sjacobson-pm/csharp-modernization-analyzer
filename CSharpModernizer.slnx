@@ -1,10 +1,25 @@
 <Solution>
+  <Folder Name="/.github/" />
+  <Folder Name="/.github/workflows/">
+    <File Path=".github/workflows/ci.yml" />
+    <File Path=".github/workflows/release.yml" />
+  </Folder>
   <Folder Name="/.root/">
     <File Path=".gitignore" />
     <File Path=".mcp.json" />
     <File Path="action.yml" />
     <File Path="Dockerfile" />
     <File Path="README.md" />
+  </Folder>
+  <Folder Name="/config/">
+    <File Path="config/default-rules.yml" />
+  </Folder>
+  <Folder Name="/docs/" />
+  <Folder Name="/docs/rules/">
+    <File Path="docs/rules/MOD001.md" />
+    <File Path="docs/rules/MOD004.md" />
+    <File Path="docs/rules/MOD008.md" />
+    <File Path="docs/rules/MOD012.md" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Analyzer.Action/Analyzer.Action.csproj" />
