@@ -282,7 +282,7 @@ public static class Program
         return CSharpCompilation.Create("ModernizationAnalyzerAction", syntaxTrees, GetMetadataReferences(), compilationOptions);
     }
 
-    private static IEnumerable<MetadataReference> GetMetadataReferences()
+    private static List<MetadataReference> GetMetadataReferences()
     {
         var trustedPlatformAssemblies = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string;
 
@@ -290,7 +290,7 @@ public static class Program
         {
             return trustedPlatformAssemblies.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
                                             .Distinct(StringComparer.OrdinalIgnoreCase)
-                                            .Select(path => (MetadataReference)MetadataReference.CreateFromFile(path))
+                                            .Select(MetadataReference (path) => MetadataReference.CreateFromFile(path))
                                             .ToList();
         }
 

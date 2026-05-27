@@ -5,12 +5,12 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 using Analyzer.Core.Configuration;
 using Analyzer.Core.Detection;
 using Analyzer.Core.Detection.Detectors;
 using Analyzer.Core.Standards;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace Analyzer.Cli;
 
@@ -24,21 +24,42 @@ public class Program
         var configCommand = BuildConfigCommand();
         var mcpServeCommand = BuildMcpServeCommand();
 
-        rootCommand.AddCommand(scanCommand);
-        rootCommand.AddCommand(configCommand);
-        rootCommand.AddCommand(mcpServeCommand);
+        rootCommand.Subcommands.Add(scanCommand);
+        rootCommand.Subcommands.Add(configCommand);
+        rootCommand.Subcommands.Add(mcpServeCommand);
 
-        return await rootCommand.InvokeAsync(args);
+        var parseResult = rootCommand.Parse(args);
+
+        return await parseResult.InvokeAsync();
     }
 
     private static Command BuildScanCommand()
     {
-        var pathArgument = new Argument<string>("path", () => ".", "Path to scan (file, directory, or solution)");
-        var fullOption = new Option<bool>("--full", "Scan the entire repository instead of just changed files");
-        var diffOption = new Option<bool>("--diff", "Only scan uncommitted changes");
-        var outputOption = new Option<string>("--output", () => "console", "Output format: console, json, sarif, markdown");
-        var configOption = new Option<string>("--config", () => ".modernization.yml", "Path to configuration file");
-        var severityOption = new Option<string>("--severity", () => "suggestion", "Minimum severity to report: suggestion, warning, error");
+        var pathArgument = new Argument<string>("path")
+        {
+            Description = "Path to scan (file, directory, or solution)",
+            Arity = ArgumentArity.ZeroOrOne,
+            DefaultValueFactory = _ => ".",
+        };
+
+        var fullOption = new Option<bool>("--full") { Description = "Scan the entire repository instead of just changed files" };
+
+        var diffOption = new Option<bool>("--diff") { Description = "Only scan uncommitted changes" };
+
+        var outputOption = new Option<string>("--output")
+        {
+            Description = "Output format: console, json, sarif, markdown", DefaultValueFactory = _ => "console",
+        };
+
+        var configOption = new Option<string>("--config")
+        {
+            Description = "Path to configuration file", DefaultValueFactory = _ => ".modernization.yml",
+        };
+
+        var severityOption = new Option<string>("--severity")
+        {
+            Description = "Minimum severity to report: suggestion, warning, error", DefaultValueFactory = _ => "suggestion",
+        };
 
         var command = new Command("scan", "Scan files for modernization opportunities")
         {
@@ -50,14 +71,17 @@ public class Program
             severityOption,
         };
 
-        command.SetHandler(
-            async (path, full, diff, output, configPath, severity) => { await ExecuteScanAsync(path, full, diff, output, configPath, severity); },
-            pathArgument,
-            fullOption,
-            diffOption,
-            outputOption,
-            configOption,
-            severityOption);
+        command.SetAction(async (parseResult, _) =>
+        {
+            var path = parseResult.GetValue(pathArgument) ?? ".";
+            var full = parseResult.GetValue(fullOption);
+            var diff = parseResult.GetValue(diffOption);
+            var output = parseResult.GetValue(outputOption) ?? "console";
+            var configPath = parseResult.GetValue(configOption) ?? ".modernization.yml";
+            var severity = parseResult.GetValue(severityOption) ?? "suggestion";
+
+            await ExecuteScanAsync(path, full, diff, output, configPath, severity);
+        });
 
         return command;
     }
@@ -66,13 +90,22 @@ public class Program
     {
         var initCommand = new Command("init", "Generate a .modernization.yml template");
 
-        initCommand.SetHandler(async () => { await GenerateConfigTemplateAsync(); });
+        initCommand.SetAction(async (_, _) => { await GenerateConfigTemplateAsync(); });
 
         var validateCommand = new Command("validate", "Validate current configuration");
-        var configPathOption = new Option<string>("--path", () => ".modernization.yml", "Path to configuration file");
-        validateCommand.AddOption(configPathOption);
 
-        validateCommand.SetHandler(async (path) => { await ValidateConfigAsync(path); }, configPathOption);
+        var configPathOption = new Option<string>("--path")
+        {
+            Description = "Path to configuration file", DefaultValueFactory = _ => ".modernization.yml",
+        };
+
+        validateCommand.Options.Add(configPathOption);
+
+        validateCommand.SetAction(async (parseResult, _) =>
+        {
+            var path = parseResult.GetValue(configPathOption) ?? ".modernization.yml";
+            await ValidateConfigAsync(path);
+        });
 
         var command = new Command("config", "Configuration management") { initCommand, validateCommand };
 
@@ -81,21 +114,22 @@ public class Program
 
     private static Command BuildMcpServeCommand()
     {
-        var transportOption = new Option<string>("--transport", () => "stdio", "Transport mode: stdio or http");
-        var portOption = new Option<int>("--port", () => 3000, "HTTP port (only used with --transport http)");
+        var transportOption = new Option<string>("--transport") { Description = "Transport mode: stdio or http", DefaultValueFactory = _ => "stdio" };
+
+        var portOption = new Option<int>("--port") { Description = "HTTP port (only used with --transport http)", DefaultValueFactory = _ => 3000 };
+
         var command = new Command("mcp-serve", "Start MCP server for AI agent integration") { transportOption, portOption };
 
-        command.SetHandler(
-            async (transport, _) =>
-            {
-                Console.WriteLine($"Starting MCP server ({transport} transport)...");
-                Console.WriteLine("MCP server implementation pending - see Analyzer.Mcp project");
+        command.SetAction(async (parseResult, _) =>
+        {
+            var transport = parseResult.GetValue(transportOption);
 
-                // TODO: Wire up to Analyzer.Mcp server
-                await Task.CompletedTask;
-            },
-            transportOption,
-            portOption);
+            Console.WriteLine($"Starting MCP server ({transport} transport)...");
+            Console.WriteLine("MCP server implementation pending - see Analyzer.Mcp project");
+
+            // TODO: Wire up to Analyzer.Mcp server
+            await Task.CompletedTask;
+        });
 
         return command;
     }

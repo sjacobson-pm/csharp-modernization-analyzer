@@ -261,7 +261,9 @@ public sealed class McpServer
 
     private static string SerializeErrorResponse(JsonElement? idElement, int code, string message)
     {
-        object? id = idElement is null || idElement.Value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null ? null : idElement.Value.Clone();
+        var id = idElement is null || idElement.Value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null
+            ? default(JsonElement?)
+            : idElement.Value.Clone();
 
         return JsonSerializer.Serialize(new { jsonrpc = "2.0", id, error = new { code, message } }, JsonOptions);
     }

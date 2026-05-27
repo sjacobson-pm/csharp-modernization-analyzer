@@ -30,7 +30,11 @@ public sealed class RawStringLiteralDetector : IPatternDetector
             var token = literal.Token;
             var tokenText = token.Text;
 
-            if (tokenText.StartsWith("\"\"\"", StringComparison.Ordinal)) { continue; }
+            if (tokenText.StartsWith(
+                    """"
+                    """
+                    """",
+                    StringComparison.Ordinal)) { continue; }
 
             var isVerbatim = tokenText.StartsWith("@\"", StringComparison.Ordinal);
             var escapeCount = isVerbatim ? 0 : CountEscapeSequences(tokenText);
