@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Analyzer.Action/Analyzer.Action.csproj" />
+    <Project Path="src/Analyzer.Cli/Analyzer.Cli.csproj" />
+    <Project Path="src/Analyzer.Core/Analyzer.Core.csproj" />
+    <Project Path="src/Analyzer.Extension/Analyzer.Extension.csproj" />
+    <Project Path="src/Analyzer.Mcp/Analyzer.Mcp.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Analyzer.Core.Tests/Analyzer.Core.Tests.csproj" />
+  </Folder>
+</Solution>

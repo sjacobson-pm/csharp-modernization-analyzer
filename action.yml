@@ -1,0 +1,71 @@
+name: 'C# Modernization Analyzer'
+description: 'Identifies outdated C# language constructs and suggests modern equivalents via PR comments'
+author: 'sjacobson-pm'
+
+branding:
+  icon: 'zap'
+  color: 'purple'
+
+inputs:
+  scope:
+    description: 'Analysis scope: changed-files (default) or full-repo'
+    required: false
+    default: 'changed-files'
+  config-path:
+    description: 'Path to .modernization.yml configuration file'
+    required: false
+    default: '.modernization.yml'
+  ai-enabled:
+    description: 'Enable AI-powered explanations and diff refinement'
+    required: false
+    default: 'true'
+  ai-provider:
+    description: 'AI provider: openai or azure-openai'
+    required: false
+    default: 'openai'
+  ai-model:
+    description: 'AI model to use for explanations'
+    required: false
+    default: 'gpt-4o'
+  github-token:
+    description: 'GitHub token for posting PR comments'
+    required: true
+  openai-api-key:
+    description: 'OpenAI API key (required if ai-enabled is true)'
+    required: false
+  max-suggestions:
+    description: 'Maximum number of inline suggestions to post per PR'
+    required: false
+    default: '25'
+  severity-threshold:
+    description: 'Minimum severity to report: suggestion, warning, or error'
+    required: false
+    default: 'suggestion'
+
+outputs:
+  suggestions-count:
+    description: 'Total number of modernization suggestions found'
+  sarif-path:
+    description: 'Path to the generated SARIF report file'
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+  args:
+    - '--scope'
+    - ${{ inputs.scope }}
+    - '--config'
+    - ${{ inputs.config-path }}
+    - '--ai-enabled'
+    - ${{ inputs.ai-enabled }}
+    - '--ai-provider'
+    - ${{ inputs.ai-provider }}
+    - '--ai-model'
+    - ${{ inputs.ai-model }}
+    - '--max-suggestions'
+    - ${{ inputs.max-suggestions }}
+    - '--severity-threshold'
+    - ${{ inputs.severity-threshold }}
+  env:
+    GITHUB_TOKEN: ${{ inputs.github-token }}
+    OPENAI_API_KEY: ${{ inputs.openai-api-key }}

@@ -1,0 +1,125 @@
+# Default modernization rules configuration
+# These rules are applied unless overridden by .modernization.yml in the target repo
+
+version: 1
+
+rules:
+  MOD001:
+    id: MOD001
+    name: prefer-var
+    category: typing
+    description: "Use 'var' for local variable declarations where type is apparent"
+    min_lang_version: "3.0"
+    default_severity: suggestion
+    respects_editorconfig: true
+    editorconfig_keys:
+      - csharp_style_var_for_built_in_types
+      - csharp_style_var_when_type_is_apparent
+      - csharp_style_var_elsewhere
+
+  MOD002:
+    id: MOD002
+    name: null-conditional-operator
+    category: null-handling
+    description: "Use null-conditional (?.) and null-coalescing (??) operators instead of explicit null checks"
+    min_lang_version: "6.0"
+    default_severity: suggestion
+    respects_editorconfig: true
+    editorconfig_keys:
+      - dotnet_style_null_propagation
+      - dotnet_style_coalesce_expression
+
+  MOD003:
+    id: MOD003
+    name: string-interpolation
+    category: strings
+    description: "Use string interpolation ($\"\") instead of string.Format()"
+    min_lang_version: "6.0"
+    default_severity: suggestion
+    respects_editorconfig: false
+
+  MOD004:
+    id: MOD004
+    name: pattern-matching
+    category: pattern-matching
+    description: "Use pattern matching instead of 'is' with cast or 'as' with null check"
+    min_lang_version: "7.0"
+    default_severity: suggestion
+    respects_editorconfig: true
+    editorconfig_keys:
+      - csharp_style_pattern_matching_over_is_with_cast_check
+      - csharp_style_pattern_matching_over_as_with_null_check
+
+  MOD005:
+    id: MOD005
+    name: switch-expression
+    category: control-flow
+    description: "Use switch expressions instead of multi-branch if/else on the same variable"
+    min_lang_version: "8.0"
+    default_severity: suggestion
+    respects_editorconfig: false
+
+  MOD006:
+    id: MOD006
+    name: using-declaration
+    category: resource-management
+    description: "Use 'using' declarations instead of 'using' block statements"
+    min_lang_version: "8.0"
+    default_severity: suggestion
+    respects_editorconfig: false
+
+  MOD007:
+    id: MOD007
+    name: null-coalescing-assignment
+    category: null-handling
+    description: "Use null-coalescing assignment (??=) instead of if-null-then-assign patterns"
+    min_lang_version: "8.0"
+    default_severity: suggestion
+    respects_editorconfig: false
+
+  MOD008:
+    id: MOD008
+    name: file-scoped-namespace
+    category: structure
+    description: "Use file-scoped namespace declarations to reduce nesting"
+    min_lang_version: "10.0"
+    default_severity: suggestion
+    respects_editorconfig: true
+    editorconfig_keys:
+      - csharp_style_namespace_declarations
+
+  MOD009:
+    id: MOD009
+    name: target-typed-new
+    category: typing
+    description: "Use target-typed 'new()' when the type is evident from context"
+    min_lang_version: "9.0"
+    default_severity: suggestion
+    respects_editorconfig: false
+
+  MOD010:
+    id: MOD010
+    name: collection-expression
+    category: collections
+    description: "Use collection expressions ([...]) instead of explicit collection initialization"
+    min_lang_version: "12.0"
+    default_severity: suggestion
+    respects_editorconfig: false
+
+  MOD011:
+    id: MOD011
+    name: raw-string-literal
+    category: strings
+    description: "Use raw string literals (\"\"\") for multi-line or heavily escaped strings"
+    min_lang_version: "11.0"
+    default_severity: suggestion
+    respects_editorconfig: false
+
+  MOD012:
+    id: MOD012
+    name: primary-constructor
+    category: constructors
+    description: "Use primary constructors for simple DI parameter capture"
+    min_lang_version: "12.0"
+    default_severity: suggestion
+    respects_editorconfig: false
